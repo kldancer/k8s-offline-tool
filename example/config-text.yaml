@@ -1,0 +1,12 @@
+# 私有仓库配置
+registry:
+  endpoint: "ykl.io"
+  port: 40443
+  ip: 192.168.1.7
+
+# 节点列表（按顺序进行安装）
+nodes:
+  - ip: "192.168.31.133"
+    password: "root"
+    is_master: true
+    install_tools: true

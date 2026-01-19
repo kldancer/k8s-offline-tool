@@ -1,3 +1,5 @@
+# 全量配置示例
+
 # 全局 SSH 默认设置
 ssh_port: 22
 user: "root"
@@ -11,23 +13,17 @@ versions:
 
 # 私有仓库配置
 registry:
-  endpoint: "ykl.io:40443"
-  use_http: true
-  username: "admin"
-  password: "password"
+  endpoint: "ykl.io"
+  port: 40443
+  ip: 192.168.1.7
 
-# 节点列表（支持并行安装）
+# 节点列表（按顺序进行安装）
 nodes:
   - ip: "192.168.31.133"
     password: "root"
-    remote_tmp_dir: "/tmp/k8s-offline-install"
+    ssh_port: 22
     is_master: true
     install_tools: true
 
 # Worker 节点加入集群的命令 (在 is_master: false 的节点上执行)
-# 注意：在全新安装时，Master 并行执行完后才会生成此命令。
-# 此字段适用于向现有集群扩容，或者分批次执行（先跑 Master，拿到 token 填入这里，再跑 Worker）。
 join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-ca-cert-hash <hash>"
-
-# 多节点安装是否并发执行，默认不并发执行，因为考虑到安装耗时不长，并发执行导致日志可读性差
-concurrent_exec: false

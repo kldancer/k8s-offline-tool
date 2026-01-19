@@ -123,15 +123,14 @@ func (u *UbuntuInstaller) ConfigureAndStartContainerd() error {
 	if u.Ctx.Cfg.Registry.Endpoint != "" {
 		u.Ctx.RunCmd("sed -i \"s|config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'|config_path = '/etc/containerd/certs.d'|g\" /etc/containerd/config.toml")
 		// Configure certs
-		regDomain := u.Ctx.Cfg.Registry.Endpoint
-		regUrl := regDomain
-		if !strings.HasPrefix(regUrl, "http") {
-			if u.Ctx.Cfg.Registry.UseHTTP {
-				regUrl = "http://" + regDomain
-			} else {
-				regUrl = "https://" + regDomain
-			}
-		}
+		regDomain := u.Ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", u.Ctx.Cfg.Registry.Port)
+		u.Ctx.RunCmd(fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%S/google_containers/pause:3.10.1'|g\" /etc/containerd/config.toml",
+			regDomain))
+
+		// 3.4 添加域名解析配置
+		u.Ctx.RunCmd(fmt.Sprintf(" echo \" %s %s\" | sudo tee -a /etc/hosts", u.Ctx.Cfg.Registry.IP, u.Ctx.Cfg.Registry.Endpoint))
+
+		regUrl := "http://" + regDomain
 
 		u.Ctx.RunCmd(fmt.Sprintf("mkdir -p /etc/containerd/certs.d/%s", regDomain))
 		hostsToml := fmt.Sprintf(`server = "%s"

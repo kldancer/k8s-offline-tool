@@ -25,11 +25,7 @@ type Manager struct {
 
 // NewManager 创建针对特定节点的管理器
 func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig) (*Manager, error) {
-	// 参数合并：如果节点配置中没有 User/Port，使用全局默认
-	user := nodeCfg.User
-	if user == "" {
-		user = globalCfg.User
-	}
+	user := globalCfg.User
 	port := nodeCfg.SSHPort
 	if port == 0 {
 		port = globalCfg.SSHPort
@@ -38,10 +34,6 @@ func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig) (*Manager,
 	client, err := ssh.NewClient(nodeCfg.IP, port, user, nodeCfg.Password)
 	if err != nil {
 		return nil, fmt.Errorf("ssh connection to %s failed: %v", nodeCfg.IP, err)
-	}
-
-	if nodeCfg.RemoteTmpDir == "" {
-		nodeCfg.RemoteTmpDir = config.RemoteTmpDir
 	}
 
 	return &Manager{
@@ -77,7 +69,7 @@ func (m *Manager) detectEnv() error {
 		Cfg:          m.globalCfg, // 注意：Context 中传递 Global 配置用于获取 Registry/Versions
 		Arch:         arch,
 		HasGPU:       hasGPU,
-		RemoteTmpDir: m.nodeCfg.RemoteTmpDir,
+		RemoteTmpDir: config.RemoteTmpDir,
 		RunCmd:       m.client.RunCommand,
 	}
 
@@ -189,7 +181,7 @@ func (m *Manager) distributeResources() error {
 		}
 		defer f.Close()
 
-		remotePath := path.Join(m.nodeCfg.RemoteTmpDir, slashPath)
+		remotePath := path.Join(m.context.RemoteTmpDir, slashPath)
 
 		// 调用新版的 WriteFile (传入 io.Reader)
 		if err := m.client.WriteFile(remotePath, f); err != nil {
@@ -217,7 +209,7 @@ func (m *Manager) Run() error {
 		{
 			Name: "分发离线资源",
 			Check: func() (bool, error) {
-				if _, err := m.client.RunCommand(fmt.Sprintf("test -d %q", m.nodeCfg.RemoteTmpDir)); err == nil {
+				if _, err := m.client.RunCommand(fmt.Sprintf("test -d %q", m.context.RemoteTmpDir)); err == nil {
 					return true, nil // 存在
 				}
 				return false, nil // 不存在
@@ -321,6 +313,13 @@ func (m *Manager) checkClusterStatus() (bool, error) {
 	if !m.nodeCfg.IsMaster {
 		out, err = m.client.RunCommand("ls /etc/kubernetes/kubelet.conf")
 	}
+	if err == nil && out != "" {
+		err = m.generateClusterJoinCommand()
+		if err != nil {
+			return false, err
+		}
+	}
+
 	return err == nil && out != "", nil
 }
 
@@ -342,6 +341,12 @@ func (m *Manager) runKubeadm() error {
 		fmt.Printf("[%s] Init Result:\n%s\n", m.nodeCfg.IP, out)
 
 		m.client.RunCommand("mkdir -p $HOME/.kube && cp -i /etc/kubernetes/admin.conf $HOME/.kube/config && chown $(id -u):$(id -g) $HOME/.kube/config")
+
+		err = m.generateClusterJoinCommand()
+		if err != nil {
+			return err
+		}
+
 		return nil
 	} else {
 		// Worker 节点
@@ -351,5 +356,15 @@ func (m *Manager) runKubeadm() error {
 			return err
 		}
 	}
+	return nil
+}
+
+func (m *Manager) generateClusterJoinCommand() error {
+	out, err := m.client.RunCommand("kubeadm token create --print-join-command")
+	if err != nil {
+		return fmt.Errorf("kubeadm token create --print-join-command failed, %s", out)
+	}
+	fmt.Printf("[%s] Token Create Result:\n%s\n", m.nodeCfg.IP, out)
+	m.globalCfg.JoinCommand = out
 	return nil
 }

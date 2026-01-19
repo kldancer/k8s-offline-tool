@@ -3,28 +3,23 @@ package main
 import (
 	"flag"
 	"fmt"
-	"log"
-	"os"
-	"sync"
-
 	"k8s-offline-tool/pkg/config"
 	"k8s-offline-tool/pkg/install"
+	"log"
+	"os"
 
 	"gopkg.in/yaml.v3"
 )
 
 func main() {
-	cfgPath := flag.String("config", "config.yaml", "Path to configuration file")
-	
+	cfgPath := flag.String("config", "", "配置文件路径。e.g. config.yaml")
 	flag.Parse()
 
 	// 1. 加载配置
 	cfg := loadConfig(*cfgPath)
 	if len(cfg.Nodes) == 0 {
 		log.Fatal("Error: No nodes defined in config.yaml")
-	}
-
-	if cfg.ConcurrentExec == true {
+		return
 	}
 
 	// 判断安装版本
@@ -64,52 +59,43 @@ func main() {
 		}
 	}
 
-	fmt.Printf("Starting parallel deployment on %d nodes...\n\n", len(cfg.Nodes))
+	fmt.Printf("开始部署 %d 个节点...\n\n", len(cfg.Nodes))
 
-	// 2. 并行执行
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(cfg.Nodes))
+	// 2. 顺序执行, 先执行master节点安装
+	for i := range cfg.Nodes {
+		if !cfg.Nodes[i].IsMaster {
+			continue
+		}
+		if err := managerRun(cfg, i); err != nil {
+			log.Fatal(err)
+			return
+		}
+	}
 
 	for i := range cfg.Nodes {
-		wg.Add(1)
-		node := cfg.Nodes[i] // 复制一份，避免闭包问题
-
-		go func(n config.NodeConfig) {
-			defer wg.Done()
-
-			// 创建管理器
-			mgr, err := install.NewManager(cfg, &n)
-			if err != nil {
-				errChan <- fmt.Errorf("[%s] Init failed: %v", n.IP, err)
-				return
-			}
-			defer mgr.Close()
-
-			// 执行安装
-			if err := mgr.Run(); err != nil {
-				errChan <- fmt.Errorf("[%s] Failed: %v", n.IP, err)
-				return
-			}
-		}(node)
+		if cfg.Nodes[i].IsMaster {
+			continue
+		}
+		if err := managerRun(cfg, i); err != nil {
+			log.Fatal(err)
+			return
+		}
 	}
+}
 
-	// 3. 等待所有结束
-	wg.Wait()
-	close(errChan)
-
-	// 4. 汇总结果
-	failed := false
-	for err := range errChan {
-		log.Printf("ERROR: %v", err)
-		failed = true
+func managerRun(cfg *config.Config, i int) error {
+	// 创建管理器
+	mgr, err := install.NewManager(cfg, &cfg.Nodes[i])
+	if err != nil {
+		return fmt.Errorf("[%s] Init failed: %v", cfg.Nodes[i].IP, err)
 	}
+	defer mgr.Close()
 
-	if !failed {
-		fmt.Println("\nAll nodes completed successfully!")
-	} else {
-		fmt.Println("\nSome nodes failed. Check logs above.")
-		os.Exit(1)
+	// 执行安装
+	if err := mgr.Run(); err != nil {
+		return fmt.Errorf("[%s] Failed: %v", cfg.Nodes[i].IP, err)
 	}
+	return nil
 }
 
 func loadConfig(path string) *config.Config {

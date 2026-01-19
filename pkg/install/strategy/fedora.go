@@ -136,18 +136,17 @@ func (f *FedoraInstaller) ConfigureAndStartContainerd() error {
 	if f.Ctx.Cfg.Registry.Endpoint != "" {
 		// 3.1 启用 certs.d 目录配置
 		f.Ctx.RunCmd("sed -i \"s|config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'|config_path = '/etc/containerd/certs.d'|g\" /etc/containerd/config.toml")
-
 		// 3.2 配置 hosts.toml
-		regDomain := f.Ctx.Cfg.Registry.Endpoint
-		regUrl := regDomain
-		// 判断是否需要添加协议头
-		if !strings.HasPrefix(regUrl, "http") {
-			if f.Ctx.Cfg.Registry.UseHTTP {
-				regUrl = "http://" + regDomain
-			} else {
-				regUrl = "https://" + regDomain
-			}
-		}
+		regDomain := f.Ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", f.Ctx.Cfg.Registry.Port)
+
+		// 3.3 修改 sandbox镜像
+		f.Ctx.RunCmd(fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%S/google_containers/pause:3.10.1'|g\" /etc/containerd/config.toml",
+			regDomain))
+
+		// 3.4 添加域名解析配置
+		f.Ctx.RunCmd(fmt.Sprintf(" echo \" %s %s\" | sudo tee -a /etc/hosts", f.Ctx.Cfg.Registry.IP, f.Ctx.Cfg.Registry.Endpoint))
+
+		regUrl := "http://" + regDomain
 
 		// 创建目录
 		f.Ctx.RunCmd(fmt.Sprintf("mkdir -p /etc/containerd/certs.d/%s", regDomain))
