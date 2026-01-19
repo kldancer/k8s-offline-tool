@@ -13,11 +13,12 @@ import (
 )
 
 type Client struct {
-	client *ssh.Client
-	sftp   *sftp.Client
+	client  *ssh.Client
+	sftp    *sftp.Client
+	timeout time.Duration
 }
 
-func NewClient(ip string, port int, user, password string) (*Client, error) {
+func NewClient(ip string, port int, user, password string, commandTimeout time.Duration) (*Client, error) {
 	config := &ssh.ClientConfig{
 		User: user,
 		Auth: []ssh.AuthMethod{
@@ -40,8 +41,9 @@ func NewClient(ip string, port int, user, password string) (*Client, error) {
 	}
 
 	return &Client{
-		client: conn,
-		sftp:   sftpClient,
+		client:  conn,
+		sftp:    sftpClient,
+		timeout: commandTimeout,
 	}, nil
 }
 
@@ -62,12 +64,27 @@ func (c *Client) RunCommand(cmd string) (string, error) {
 	}
 	defer session.Close()
 
-	output, err := session.CombinedOutput(cmd)
-	outStr := string(output)
-	if err != nil {
-		return outStr, fmt.Errorf("command '%s' failed: %v, output: %s", cmd, err, strings.TrimSpace(outStr))
+	type result struct {
+		output []byte
+		err    error
 	}
-	return strings.TrimSpace(outStr), nil
+	resultCh := make(chan result, 1)
+	go func() {
+		output, err := session.CombinedOutput(cmd)
+		resultCh <- result{output: output, err: err}
+	}()
+
+	select {
+	case res := <-resultCh:
+		outStr := string(res.output)
+		if res.err != nil {
+			return outStr, fmt.Errorf("command '%s' failed: %v, output: %s", cmd, res.err, strings.TrimSpace(outStr))
+		}
+		return strings.TrimSpace(outStr), nil
+	case <-time.After(c.timeout):
+		_ = session.Close()
+		return "", fmt.Errorf("command '%s' timed out after %s", cmd, c.timeout)
+	}
 }
 
 // DetectArch 检测远程架构
