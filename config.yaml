@@ -3,6 +3,8 @@
 # 全局 SSH 默认设置
 ssh_port: 22
 user: "root"
+# 命令执行超时（秒）
+command_timeout_seconds: 600
 
 # 软件版本定义
 versions:

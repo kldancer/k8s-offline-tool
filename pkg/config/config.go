@@ -8,6 +8,8 @@ type Config struct {
 	// 默认 SSH 配置 (如果 Node 中未指定则使用此默认值)
 	SSHPort int    `yaml:"ssh_port"`
 	User    string `yaml:"user"`
+	// 命令执行超时（秒）
+	CommandTimeoutSeconds int `yaml:"command_timeout_seconds"`
 
 	// 节点列表
 	Nodes       []NodeConfig `yaml:"nodes"`

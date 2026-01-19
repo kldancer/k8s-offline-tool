@@ -2,10 +2,13 @@ package install
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
+	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"k8s-offline-tool/pkg/assets"
 	"k8s-offline-tool/pkg/config"
@@ -21,17 +24,22 @@ type Manager struct {
 	client    *ssh.Client
 	installer strategy.NodeInstaller
 	context   *strategy.Context
+	output    io.Writer
 }
 
 // NewManager 创建针对特定节点的管理器
-func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig) (*Manager, error) {
+func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig, output io.Writer) (*Manager, error) {
+	if output == nil {
+		output = os.Stdout
+	}
 	user := globalCfg.User
 	port := nodeCfg.SSHPort
 	if port == 0 {
 		port = globalCfg.SSHPort
 	}
 
-	client, err := ssh.NewClient(nodeCfg.IP, port, user, nodeCfg.Password)
+	commandTimeout := time.Duration(globalCfg.CommandTimeoutSeconds) * time.Second
+	client, err := ssh.NewClient(nodeCfg.IP, port, user, nodeCfg.Password, commandTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("ssh connection to %s failed: %v", nodeCfg.IP, err)
 	}
@@ -40,6 +48,7 @@ func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig) (*Manager,
 		globalCfg: globalCfg,
 		nodeCfg:   nodeCfg,
 		client:    client,
+		output:    output,
 	}, nil
 }
 
@@ -171,7 +180,7 @@ func (m *Manager) distributeResources() error {
 		}
 
 		// 关键点：在 WriteFile 之前打印，让用户知道正在传这个文件
-		fmt.Printf("\r%s  └─ Syncing: [%s] %3.0f%% (%d/%d) %-25s", prefix, bar, percent, current, totalFiles, fileName)
+		fmt.Fprintf(m.output, "\r%s  └─ Syncing: [%s] %3.0f%% (%d/%d) %-25s", prefix, bar, percent, current, totalFiles, fileName)
 
 		// --- 开始流式传输 ---
 		// 使用 Open 打开流，而不是 ReadFile 读入内存
@@ -189,21 +198,21 @@ func (m *Manager) distributeResources() error {
 		}
 
 		if current == totalFiles {
-			fmt.Print("\n")
+			fmt.Fprint(m.output, "\n")
 		}
 
 		return nil
 	})
 }
 
-func (m *Manager) Run() error {
+func (m *Manager) Run(dryRun bool) error {
 	if err := m.detectEnv(); err != nil {
 		return err
 	}
 
 	// 定义日志前缀
 	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
-	fmt.Printf("%sDetected: %s | Arch: %s | GPU: %v\n", prefix, m.installer.Name(), m.context.Arch, m.context.HasGPU)
+	fmt.Fprintf(m.output, "%sDetected: %s | Arch: %s | GPU: %v\n", prefix, m.installer.Name(), m.context.Arch, m.context.HasGPU)
 
 	steps := []runner.Step{
 		{
@@ -304,7 +313,7 @@ func (m *Manager) Run() error {
 	}
 
 	// 调用 Runner，传入前缀
-	return runner.RunPipeline(steps, prefix)
+	return runner.RunPipeline(steps, prefix, m.output, dryRun)
 }
 
 func (m *Manager) checkClusterStatus() (bool, error) {
@@ -338,7 +347,7 @@ func (m *Manager) runKubeadm() error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("[%s] Init Result:\n%s\n", m.nodeCfg.IP, out)
+		fmt.Fprintf(m.output, "[%s] Init Result:\n%s\n", m.nodeCfg.IP, out)
 
 		m.client.RunCommand("mkdir -p $HOME/.kube && cp -i /etc/kubernetes/admin.conf $HOME/.kube/config && chown $(id -u):$(id -g) $HOME/.kube/config")
 
@@ -364,7 +373,7 @@ func (m *Manager) generateClusterJoinCommand() error {
 	if err != nil {
 		return fmt.Errorf("kubeadm token create --print-join-command failed, %s", out)
 	}
-	fmt.Printf("[%s] Token Create Result:\n%s\n", m.nodeCfg.IP, out)
+	fmt.Fprintf(m.output, "[%s] Token Create Result:\n%s\n", m.nodeCfg.IP, out)
 	m.globalCfg.JoinCommand = out
 	return nil
 }

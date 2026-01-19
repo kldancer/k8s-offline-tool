@@ -4,6 +4,9 @@ registry:
   port: 40443
   ip: 192.168.1.7
 
+# 命令执行超时（秒）
+# command_timeout_seconds: 600
+
 # 节点列表（按顺序进行安装）
 nodes:
   - ip: "192.168.31.133"
