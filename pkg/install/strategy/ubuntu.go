@@ -66,7 +66,7 @@ func (u *UbuntuInstaller) CheckCommonTools() (bool, error) {
 	//	return false, nil
 	//}
 	// 暂时默认重新装一遍就行
-	return true, nil
+	return false, nil
 }
 func (u *UbuntuInstaller) InstallCommonTools() error {
 	debPath := fmt.Sprintf("%s/common-tools/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
@@ -99,10 +99,11 @@ func (u *UbuntuInstaller) InstallRunc() error {
 }
 
 func (u *UbuntuInstaller) CheckContainerdService() (bool, error) {
-	if _, err := u.Ctx.RunCmd(fmt.Sprintf("test -d %q", "/usr/lib/systemd/system/containerd.service")); err == nil {
-		return true, nil // 存在
+	out, err := u.Ctx.RunCmd("test -d /usr/lib/systemd/system/containerd.service && echo EXISTS || echo MISSING")
+	if err != nil {
+		return false, err
 	}
-	return false, nil // 不存在
+	return strings.TrimSpace(out) == "EXISTS", nil
 }
 
 func (u *UbuntuInstaller) ConfigureContainerdService() error {

@@ -107,10 +107,11 @@ func (f *FedoraInstaller) InstallRunc() error {
 }
 
 func (f *FedoraInstaller) CheckContainerdService() (bool, error) {
-	if _, err := f.Ctx.RunCmd(fmt.Sprintf("test -d %q", "/usr/lib/systemd/system/containerd.service")); err == nil {
-		return true, nil // 存在
+	out, err := f.Ctx.RunCmd("test -e /usr/lib/systemd/system/containerd.service && echo EXISTS || echo MISSING")
+	if err != nil {
+		return false, err
 	}
-	return false, nil // 不存在
+	return strings.TrimSpace(out) == "EXISTS", nil
 }
 
 func (f *FedoraInstaller) ConfigureContainerdService() error {
@@ -140,8 +141,8 @@ func (f *FedoraInstaller) ConfigureAndStartContainerd() error {
 		regDomain := f.Ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", f.Ctx.Cfg.Registry.Port)
 
 		// 3.3 修改 sandbox镜像
-		f.Ctx.RunCmd(fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%S/google_containers/pause:3.10.1'|g\" /etc/containerd/config.toml",
-			regDomain))
+		c := fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%s/google_containers/pause:3.10.1'|g\" /etc/containerd/config.toml", regDomain)
+		f.Ctx.RunCmd(c)
 
 		// 3.4 添加域名解析配置
 		f.Ctx.RunCmd(fmt.Sprintf(" echo \" %s %s\" | sudo tee -a /etc/hosts", f.Ctx.Cfg.Registry.IP, f.Ctx.Cfg.Registry.Endpoint))

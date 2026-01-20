@@ -21,10 +21,15 @@ registry:
 
 # 节点列表（按顺序进行安装）
 nodes:
-  - ip: "192.168.31.133"
+  - ip: "192.168.1.8"
     password: "root"
     ssh_port: 22
     is_master: true
+    install_tools: true
+  - ip: "192.168.1.9"
+    password: "root"
+    ssh_port: 22
+    is_master: false
     install_tools: true
 
 # Worker 节点加入集群的命令 (在 is_master: false 的节点上执行)

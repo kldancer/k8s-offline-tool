@@ -218,10 +218,11 @@ func (m *Manager) Run(dryRun bool) error {
 		{
 			Name: "分发离线资源",
 			Check: func() (bool, error) {
-				if _, err := m.client.RunCommand(fmt.Sprintf("test -d %q", m.context.RemoteTmpDir)); err == nil {
-					return true, nil // 存在
+				out, err := m.client.RunCommand(fmt.Sprintf("test -d %q && echo EXISTS || echo MISSING", m.context.RemoteTmpDir))
+				if err != nil {
+					return false, nil
 				}
-				return false, nil // 不存在
+				return strings.TrimSpace(out) == "EXISTS", nil // 存在
 			},
 			Action: m.distributeResources,
 		},
@@ -322,7 +323,7 @@ func (m *Manager) checkClusterStatus() (bool, error) {
 	if !m.nodeCfg.IsMaster {
 		out, err = m.client.RunCommand("ls /etc/kubernetes/kubelet.conf")
 	}
-	if err == nil && out != "" {
+	if m.nodeCfg.IsMaster && err == nil && out != "" {
 		err = m.generateClusterJoinCommand()
 		if err != nil {
 			return false, err
@@ -336,18 +337,18 @@ func (m *Manager) runKubeadm() error {
 	if m.nodeCfg.IsMaster {
 		repo := "registry.aliyuncs.com/google_containers"
 		if m.globalCfg.Registry.Endpoint != "" {
-			repo = fmt.Sprintf("%s/google_containers", m.globalCfg.Registry.Endpoint)
+			repo = fmt.Sprintf("%s:%d/google_containers", m.globalCfg.Registry.Endpoint, m.globalCfg.Registry.Port)
 		}
 
 		cmd := fmt.Sprintf(`kubeadm init --v 0 \
 --kubernetes-version=v%s \
 --image-repository=%s`, m.globalCfg.Versions.K8s, repo)
 
-		out, err := m.client.RunCommand(cmd)
+		_, err := m.client.RunCommand(cmd)
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(m.output, "[%s] Init Result:\n%s\n", m.nodeCfg.IP, out)
+		//fmt.Fprintf(m.output, "[%s] Init Result:\n%s\n", m.nodeCfg.IP, out)
 
 		m.client.RunCommand("mkdir -p $HOME/.kube && cp -i /etc/kubernetes/admin.conf $HOME/.kube/config && chown $(id -u):$(id -g) $HOME/.kube/config")
 

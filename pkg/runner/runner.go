@@ -51,12 +51,13 @@ func runStep(step Step, prefix string, output io.Writer, dryRun bool) error {
 	}
 	fmt.Fprintf(output, "%s\n", yellow("待执行"))
 
-	// 2. Action
-	fmt.Fprintf(output, "%s  └─ 正在执行...   ", prefix)
 	if dryRun {
 		fmt.Fprintf(output, "%s (%v)\n", yellow("预检查跳过"), time.Since(start).Round(time.Millisecond))
 		return nil
 	}
+
+	// 2. Action
+	fmt.Fprintf(output, "%s  └─ 正在执行...   ", prefix)
 	if err := step.Action(); err != nil {
 		fmt.Fprintf(output, "%s (%v)\n", red("错误"), time.Since(start).Round(time.Second))
 		fmt.Fprintf(output, "%s     Error: %v\n", prefix, err)
