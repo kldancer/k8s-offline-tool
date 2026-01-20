@@ -46,13 +46,13 @@ func runStep(step Step, prefix string, output io.Writer, dryRun bool) error {
 	}
 
 	if ok {
-		fmt.Fprintf(output, "%s\n", green("跳过"))
+		fmt.Fprintf(output, "%s\n", green("可跳过"))
 		return nil
 	}
 	fmt.Fprintf(output, "%s\n", yellow("待执行"))
 
 	if dryRun {
-		fmt.Fprintf(output, "%s (%v)\n", yellow("预检查跳过"), time.Since(start).Round(time.Millisecond))
+		fmt.Fprintf(output, "%s  └─ %s (%v)\n", prefix, yellow("预检查跳过"), time.Since(start).Round(time.Millisecond))
 		return nil
 	}
 

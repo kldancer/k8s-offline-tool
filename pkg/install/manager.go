@@ -116,6 +116,9 @@ func (m *Manager) distributeResources() error {
 		if !isFedora && strings.Contains(p, "/rpm") {
 			return true
 		}
+		if !m.context.HasGPU && strings.Contains(p, "nvidia-container-toolkit") {
+			return true
+		}
 		return false
 	}
 
@@ -374,7 +377,7 @@ func (m *Manager) generateClusterJoinCommand() error {
 	if err != nil {
 		return fmt.Errorf("kubeadm token create --print-join-command failed, %s", out)
 	}
-	fmt.Fprintf(m.output, "[%s] Token Create Result:\n%s\n", m.nodeCfg.IP, out)
+	fmt.Fprintf(m.output, "\n[%s] Token Create Result: %s ", m.nodeCfg.IP, out)
 	m.globalCfg.JoinCommand = out
 	return nil
 }

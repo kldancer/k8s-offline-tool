@@ -25,8 +25,7 @@ func (u *UbuntuInstaller) DisableFirewall() error {
 	return nil
 }
 func (u *UbuntuInstaller) CheckSwap() (bool, error) {
-	out, _ := u.Ctx.RunCmd("swapon --show")
-	return strings.TrimSpace(out) == "", nil
+	return CheckSwap(u.Ctx)
 }
 func (u *UbuntuInstaller) DisableSwap() error {
 	u.Ctx.RunCmd("swapoff -a")
@@ -34,30 +33,16 @@ func (u *UbuntuInstaller) DisableSwap() error {
 	return nil
 }
 func (u *UbuntuInstaller) CheckKernelModules() (bool, error) {
-	out, err := u.Ctx.RunCmd("cat /etc/modules-load.d/containerd.conf")
-	return err == nil && strings.Contains(out, "overlay"), nil
+	return CheckKernelModules(u.Ctx)
 }
 func (u *UbuntuInstaller) LoadKernelModules() error {
-	u.Ctx.RunCmd(`cat > /etc/modules-load.d/containerd.conf << EOF
-overlay
-br_netfilter
-EOF`)
-	u.Ctx.RunCmd("modprobe overlay")
-	u.Ctx.RunCmd("modprobe br_netfilter")
-	return nil
+	return LoadKernelModules(u.Ctx)
 }
 func (u *UbuntuInstaller) CheckSysctl() (bool, error) {
-	out, err := u.Ctx.RunCmd("cat /etc/sysctl.d/99-kubernetes-cri.conf")
-	return err == nil && strings.Contains(out, "net.ipv4.ip_forward"), nil
+	return CheckSysctl(u.Ctx)
 }
 func (u *UbuntuInstaller) ConfigureSysctl() error {
-	u.Ctx.RunCmd(`cat > /etc/sysctl.d/99-kubernetes-cri.conf << EOF
-net.bridge.bridge-nf-call-iptables  = 1
-net.ipv4.ip_forward                 = 1
-net.bridge.bridge-nf-call-ip6tables = 1
-EOF`)
-	u.Ctx.RunCmd("sysctl --system")
-	return nil
+	return ConfigureSysctl(u.Ctx)
 }
 
 // --- Tools ---
@@ -76,117 +61,56 @@ func (u *UbuntuInstaller) InstallCommonTools() error {
 
 // --- Containerd Granular ---
 func (u *UbuntuInstaller) CheckContainerdBinaries() (bool, error) {
-	out, err := u.Ctx.RunCmd("containerd --version")
-	return err == nil && strings.Contains(out, u.Ctx.Cfg.Versions.Containerd), nil
+	return CheckContainerdBinaries(u.Ctx)
 }
 func (u *UbuntuInstaller) InstallContainerdBinaries() error {
 	vFolder := u.verPath(u.Ctx.Cfg.Versions.Containerd)
-	tarCmd := fmt.Sprintf("tar -C /usr/local -xzf %s/containerd/%s/%s/containerd-%s-linux-%s.tar.gz",
-		u.Ctx.RemoteTmpDir, u.Ctx.Arch, vFolder, u.Ctx.Cfg.Versions.Containerd, u.Ctx.Arch)
-	_, err := u.Ctx.RunCmd(tarCmd)
-	return err
+	return InstallContainerdBinaries(u.Ctx, vFolder)
 }
 
 func (u *UbuntuInstaller) CheckRunc() (bool, error) {
-	out, err := u.Ctx.RunCmd("runc --version")
-	return err == nil && strings.Contains(out, u.Ctx.Cfg.Versions.Runc), nil
+	return CheckRunc(u.Ctx)
 }
 func (u *UbuntuInstaller) InstallRunc() error {
 	vFolder := u.verPath(u.Ctx.Cfg.Versions.Runc)
-	runcPath := fmt.Sprintf("%s/runc/%s/%s/runc.%s", u.Ctx.RemoteTmpDir, u.Ctx.Arch, vFolder, u.Ctx.Arch)
-	_, err := u.Ctx.RunCmd(fmt.Sprintf("install -m 0755 %s /usr/local/bin/runc", runcPath))
-	return err
+	return InstallRunc(u.Ctx, vFolder)
 }
 
 func (u *UbuntuInstaller) CheckContainerdService() (bool, error) {
-	out, err := u.Ctx.RunCmd("test -d /usr/lib/systemd/system/containerd.service && echo EXISTS || echo MISSING")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) == "EXISTS", nil
+	return CheckContainerdService(u.Ctx)
 }
 
 func (u *UbuntuInstaller) ConfigureContainerdService() error {
-	svcSrc := fmt.Sprintf("%s/containerd/containerd.service", u.Ctx.RemoteTmpDir)
-	_, err := u.Ctx.RunCmd(fmt.Sprintf("cp %s /usr/lib/systemd/system/containerd.service", svcSrc))
-	return err
+	return ConfigureContainerdService(u.Ctx)
 }
 
 func (u *UbuntuInstaller) CheckContainerdRunning() (bool, error) {
-	out, _ := u.Ctx.RunCmd("systemctl is-active containerd")
-	return strings.TrimSpace(out) == "active", nil
+	return CheckContainerdRunning(u.Ctx)
 }
 func (u *UbuntuInstaller) ConfigureAndStartContainerd() error {
-	u.Ctx.RunCmd("mkdir -p /etc/containerd")
-	u.Ctx.RunCmd("containerd config default > /etc/containerd/config.toml")
-	u.Ctx.RunCmd("sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml")
-
-	if u.Ctx.Cfg.Registry.Endpoint != "" {
-		u.Ctx.RunCmd("sed -i \"s|config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'|config_path = '/etc/containerd/certs.d'|g\" /etc/containerd/config.toml")
-		// Configure certs
-		regDomain := u.Ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", u.Ctx.Cfg.Registry.Port)
-		u.Ctx.RunCmd(fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%S/google_containers/pause:3.10.1'|g\" /etc/containerd/config.toml",
-			regDomain))
-
-		// 3.4 添加域名解析配置
-		u.Ctx.RunCmd(fmt.Sprintf(" echo \" %s %s\" | sudo tee -a /etc/hosts", u.Ctx.Cfg.Registry.IP, u.Ctx.Cfg.Registry.Endpoint))
-
-		regUrl := "http://" + regDomain
-
-		u.Ctx.RunCmd(fmt.Sprintf("mkdir -p /etc/containerd/certs.d/%s", regDomain))
-		hostsToml := fmt.Sprintf(`server = "%s"
-
-[host."%s"]
-  capabilities = ["pull", "resolve", "push"]
-`, regUrl, regUrl)
-
-		cmd := fmt.Sprintf("cat > /etc/containerd/certs.d/%s/hosts.toml <<EOF\n%s\nEOF", regDomain, hostsToml)
-		if _, err := u.Ctx.RunCmd(cmd); err != nil {
-			return fmt.Errorf("failed to write hosts.toml: %v", err)
-		}
-
-	}
-	u.Ctx.RunCmd("systemctl daemon-reload")
-	_, err := u.Ctx.RunCmd("systemctl enable --now containerd")
-	return err
+	return ConfigureAndStartContainerd(u.Ctx)
 }
 
 func (u *UbuntuInstaller) CheckCrictl() (bool, error) {
-	out, err := u.Ctx.RunCmd("cat /etc/crictl.yaml")
-	return err == nil && strings.Contains(out, "containerd.sock"), nil
+	return CheckCrictl(u.Ctx)
 }
 func (u *UbuntuInstaller) ConfigureCrictl() error {
-	cmd := `cat > /etc/crictl.yaml << EOF
-runtime-endpoint: unix:///run/containerd/containerd.sock
-image-endpoint: unix:///run/containerd/containerd.sock
-timeout: 2
-debug: false
-pull-image-on-create: false
-EOF`
-	_, err := u.Ctx.RunCmd(cmd)
-	return err
+	return ConfigureCrictl(u.Ctx)
 }
 
 func (u *UbuntuInstaller) CheckNerdctl() (bool, error) {
-	out, err := u.Ctx.RunCmd("nerdctl --version")
-	return err == nil && strings.Contains(out, u.Ctx.Cfg.Versions.Nerdctl), nil
+	return CheckNerdctl(u.Ctx)
 }
 func (u *UbuntuInstaller) InstallNerdctl() error {
 	vFolder := u.verPath(u.Ctx.Cfg.Versions.Nerdctl)
-	tarPath := fmt.Sprintf("%s/nerdctl/%s/%s/nerdctl-%s-linux-%s.tar.gz",
-		u.Ctx.RemoteTmpDir, u.Ctx.Arch, vFolder, u.Ctx.Cfg.Versions.Nerdctl, u.Ctx.Arch)
-	_, err := u.Ctx.RunCmd(fmt.Sprintf("tar -xzf %s -C /usr/local/bin/", tarPath))
-	return err
+	return InstallNerdctl(u.Ctx, vFolder)
 }
 
 // --- GPU ---
 func (u *UbuntuInstaller) CheckGPUConfig() (bool, error) {
-	if !u.Ctx.HasGPU {
-		return true, nil
-	}
-	_, err := u.Ctx.RunCmd("nvidia-container-cli info")
-	return err == nil, nil
+	return CheckGPUConfig(u.Ctx)
 }
+
 func (u *UbuntuInstaller) ConfigureGPU() error {
 	debPath := fmt.Sprintf("%s/common-tools/%s/apt/nvidia-container-toolkit*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
 	u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s", debPath))

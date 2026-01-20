@@ -32,8 +32,7 @@ func (f *FedoraInstaller) DisableFirewall() error {
 	return nil
 }
 func (f *FedoraInstaller) CheckSwap() (bool, error) {
-	out, _ := f.Ctx.RunCmd("swapon --show")
-	return strings.TrimSpace(out) == "", nil
+	return CheckSwap(f.Ctx)
 }
 func (f *FedoraInstaller) DisableSwap() error {
 	f.Ctx.RunCmd("dnf remove -y zram-generator-defaults || true")
@@ -41,30 +40,16 @@ func (f *FedoraInstaller) DisableSwap() error {
 	return nil
 }
 func (f *FedoraInstaller) CheckKernelModules() (bool, error) {
-	out, err := f.Ctx.RunCmd("cat /etc/modules-load.d/containerd.conf")
-	return err == nil && strings.Contains(out, "overlay"), nil
+	return CheckKernelModules(f.Ctx)
 }
 func (f *FedoraInstaller) LoadKernelModules() error {
-	f.Ctx.RunCmd(`cat > /etc/modules-load.d/containerd.conf << EOF
-overlay
-br_netfilter
-EOF`)
-	f.Ctx.RunCmd("modprobe overlay")
-	f.Ctx.RunCmd("modprobe br_netfilter")
-	return nil
+	return LoadKernelModules(f.Ctx)
 }
 func (f *FedoraInstaller) CheckSysctl() (bool, error) {
-	out, err := f.Ctx.RunCmd("cat /etc/sysctl.d/99-kubernetes-cri.conf")
-	return err == nil && strings.Contains(out, "net.ipv4.ip_forward"), nil
+	return CheckSysctl(f.Ctx)
 }
 func (f *FedoraInstaller) ConfigureSysctl() error {
-	f.Ctx.RunCmd(`cat > /etc/sysctl.d/99-kubernetes-cri.conf << EOF
-net.bridge.bridge-nf-call-iptables  = 1
-net.ipv4.ip_forward                 = 1
-net.bridge.bridge-nf-call-ip6tables = 1
-EOF`)
-	f.Ctx.RunCmd("sysctl --system")
-	return nil
+	return ConfigureSysctl(f.Ctx)
 }
 
 // --- Tools ---
@@ -83,132 +68,57 @@ func (f *FedoraInstaller) InstallCommonTools() error {
 
 // --- Containerd Granular ---
 func (f *FedoraInstaller) CheckContainerdBinaries() (bool, error) {
-	out, err := f.Ctx.RunCmd("containerd --version")
-	// 检查版本是否包含配置的版本号
-	return err == nil && strings.Contains(out, f.Ctx.Cfg.Versions.Containerd), nil
+	return CheckContainerdBinaries(f.Ctx)
 }
 func (f *FedoraInstaller) InstallContainerdBinaries() error {
 	vFolder := f.verPath(f.Ctx.Cfg.Versions.Containerd)
-	tarCmd := fmt.Sprintf("tar -C /usr/local -xzf %s/containerd/%s/%s/containerd-%s-linux-%s.tar.gz",
-		f.Ctx.RemoteTmpDir, f.Ctx.Arch, vFolder, f.Ctx.Cfg.Versions.Containerd, f.Ctx.Arch)
-	_, err := f.Ctx.RunCmd(tarCmd)
-	return err
+	return InstallContainerdBinaries(f.Ctx, vFolder)
 }
 
 func (f *FedoraInstaller) CheckRunc() (bool, error) {
-	out, err := f.Ctx.RunCmd("runc --version")
-	return err == nil && strings.Contains(out, f.Ctx.Cfg.Versions.Runc), nil
+	return CheckRunc(f.Ctx)
 }
 func (f *FedoraInstaller) InstallRunc() error {
 	vFolder := f.verPath(f.Ctx.Cfg.Versions.Runc)
-	runcPath := fmt.Sprintf("%s/runc/%s/%s/runc.%s", f.Ctx.RemoteTmpDir, f.Ctx.Arch, vFolder, f.Ctx.Arch)
-	_, err := f.Ctx.RunCmd(fmt.Sprintf("install -m 0755 %s /usr/local/bin/runc", runcPath))
-	return err
+	return InstallRunc(f.Ctx, vFolder)
 }
 
 func (f *FedoraInstaller) CheckContainerdService() (bool, error) {
-	out, err := f.Ctx.RunCmd("test -e /usr/lib/systemd/system/containerd.service && echo EXISTS || echo MISSING")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) == "EXISTS", nil
+	return CheckContainerdService(f.Ctx)
 }
 
 func (f *FedoraInstaller) ConfigureContainerdService() error {
-	svcSrc := fmt.Sprintf("%s/containerd/containerd.service", f.Ctx.RemoteTmpDir)
-	_, err := f.Ctx.RunCmd(fmt.Sprintf("cp %s /usr/lib/systemd/system/containerd.service", svcSrc))
-	return err
+	return ConfigureContainerdService(f.Ctx)
 }
 
 func (f *FedoraInstaller) CheckContainerdRunning() (bool, error) {
-	out, _ := f.Ctx.RunCmd("systemctl is-active containerd")
-	return strings.TrimSpace(out) == "active", nil
+	return CheckContainerdRunning(f.Ctx)
 }
 
 func (f *FedoraInstaller) ConfigureAndStartContainerd() error {
-	// 1. 生成默认配置
-	f.Ctx.RunCmd("mkdir -p /etc/containerd")
-	f.Ctx.RunCmd("containerd config default > /etc/containerd/config.toml")
-
-	// 2. 修改 SystemdCgroup
-	f.Ctx.RunCmd("sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml")
-
-	// 3. 配置 Registry
-	if f.Ctx.Cfg.Registry.Endpoint != "" {
-		// 3.1 启用 certs.d 目录配置
-		f.Ctx.RunCmd("sed -i \"s|config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'|config_path = '/etc/containerd/certs.d'|g\" /etc/containerd/config.toml")
-		// 3.2 配置 hosts.toml
-		regDomain := f.Ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", f.Ctx.Cfg.Registry.Port)
-
-		// 3.3 修改 sandbox镜像
-		c := fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%s/google_containers/pause:3.10.1'|g\" /etc/containerd/config.toml", regDomain)
-		f.Ctx.RunCmd(c)
-
-		// 3.4 添加域名解析配置
-		f.Ctx.RunCmd(fmt.Sprintf(" echo \" %s %s\" | sudo tee -a /etc/hosts", f.Ctx.Cfg.Registry.IP, f.Ctx.Cfg.Registry.Endpoint))
-
-		regUrl := "http://" + regDomain
-
-		// 创建目录
-		f.Ctx.RunCmd(fmt.Sprintf("mkdir -p /etc/containerd/certs.d/%s", regDomain))
-
-		// 写入 hosts.toml
-		hostsToml := fmt.Sprintf(`server = "%s"
-
-[host."%s"]
-  capabilities = ["pull", "resolve", "push"]
-`, regUrl, regUrl)
-
-		cmd := fmt.Sprintf("cat > /etc/containerd/certs.d/%s/hosts.toml <<EOF\n%s\nEOF", regDomain, hostsToml)
-		if _, err := f.Ctx.RunCmd(cmd); err != nil {
-			return fmt.Errorf("failed to write hosts.toml: %v", err)
-		}
-
-	}
-
-	// 4. 启动服务
-	f.Ctx.RunCmd("systemctl daemon-reload")
-	_, err := f.Ctx.RunCmd("systemctl enable --now containerd")
-	return err
+	return ConfigureAndStartContainerd(f.Ctx)
 }
 
 func (f *FedoraInstaller) CheckCrictl() (bool, error) {
-	out, err := f.Ctx.RunCmd("cat /etc/crictl.yaml")
-	return err == nil && strings.Contains(out, "containerd.sock"), nil
+	return CheckCrictl(f.Ctx)
 }
 
 func (f *FedoraInstaller) ConfigureCrictl() error {
-	cmd := `cat > /etc/crictl.yaml << EOF
-runtime-endpoint: unix:///run/containerd/containerd.sock
-image-endpoint: unix:///run/containerd/containerd.sock
-timeout: 2
-debug: false
-pull-image-on-create: false
-EOF`
-	_, err := f.Ctx.RunCmd(cmd)
-	return err
+	return ConfigureCrictl(f.Ctx)
 }
 
 func (f *FedoraInstaller) CheckNerdctl() (bool, error) {
-	out, err := f.Ctx.RunCmd("nerdctl --version")
-	return err == nil && strings.Contains(out, f.Ctx.Cfg.Versions.Nerdctl), nil
+	return CheckNerdctl(f.Ctx)
 }
 
 func (f *FedoraInstaller) InstallNerdctl() error {
 	vFolder := f.verPath(f.Ctx.Cfg.Versions.Nerdctl)
-	tarPath := fmt.Sprintf("%s/nerdctl/%s/%s/nerdctl-%s-linux-%s.tar.gz",
-		f.Ctx.RemoteTmpDir, f.Ctx.Arch, vFolder, f.Ctx.Cfg.Versions.Nerdctl, f.Ctx.Arch)
-	_, err := f.Ctx.RunCmd(fmt.Sprintf("tar -xzf %s -C /usr/local/bin/", tarPath))
-	return err
+	return InstallNerdctl(f.Ctx, vFolder)
 }
 
 // --- GPU ---
 func (f *FedoraInstaller) CheckGPUConfig() (bool, error) {
-	if !f.Ctx.HasGPU {
-		return true, nil
-	}
-	_, err := f.Ctx.RunCmd("nvidia-container-cli info")
-	return err == nil, nil
+	return CheckGPUConfig(f.Ctx)
 }
 
 func (f *FedoraInstaller) ConfigureGPU() error {
