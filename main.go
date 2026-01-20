@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"errors"
 	"flag"
 	"fmt"
@@ -10,9 +9,7 @@ import (
 	"k8s-offline-tool/pkg/install"
 	"log"
 	"os"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -51,11 +48,13 @@ func main() {
 		}
 	}
 
-	workerResults, err := runWorkersConcurrently(cfg, *dryRun)
-	if err != nil && runErr == nil {
-		runErr = err
-	}
+	workerResults := runWorkersSequentially(cfg, os.Stdout, *dryRun)
 	results = append(results, workerResults...)
+	for _, result := range workerResults {
+		if result.Err != nil && runErr == nil {
+			runErr = result.Err
+		}
+	}
 
 	printSummary(results, *dryRun)
 	if runErr != nil {
@@ -80,62 +79,16 @@ func runNode(cfg *config.Config, i int, writer io.Writer, dryRun bool) nodeResul
 	}
 }
 
-type workerResult struct {
-	result nodeResult
-	logs   *bytes.Buffer
-}
-
-func runWorkersConcurrently(cfg *config.Config, dryRun bool) ([]nodeResult, error) {
-	var (
-		wg      sync.WaitGroup
-		results = make(chan workerResult, len(cfg.Nodes))
-	)
-
+func runWorkersSequentially(cfg *config.Config, writer io.Writer, dryRun bool) []nodeResult {
+	results := make([]nodeResult, 0, len(cfg.Nodes))
 	for i := range cfg.Nodes {
 		if cfg.Nodes[i].IsMaster {
 			continue
 		}
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			buf := &bytes.Buffer{}
-			err := managerRun(cfg, idx, buf, dryRun)
-			results <- workerResult{
-				result: nodeResult{
-					Index:    idx,
-					IP:       cfg.Nodes[idx].IP,
-					IsMaster: cfg.Nodes[idx].IsMaster,
-					Err:      err,
-				},
-				logs: buf,
-			}
-		}(i)
+		result := runNode(cfg, i, writer, dryRun)
+		results = append(results, result)
 	}
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	ordered := make([]workerResult, 0)
-	for res := range results {
-		ordered = append(ordered, res)
-	}
-	sort.Slice(ordered, func(i, j int) bool {
-		return ordered[i].result.Index < ordered[j].result.Index
-	})
-
-	finalResults := make([]nodeResult, 0, len(ordered))
-	var firstErr error
-	for _, res := range ordered {
-		fmt.Print(res.logs.String())
-		finalResults = append(finalResults, res.result)
-		if res.result.Err != nil && firstErr == nil {
-			firstErr = res.result.Err
-		}
-	}
-
-	return finalResults, firstErr
+	return results
 }
 
 func managerRun(cfg *config.Config, i int, writer io.Writer, dryRun bool) error {
