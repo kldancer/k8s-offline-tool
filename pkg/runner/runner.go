@@ -34,36 +34,36 @@ func runStep(step Step, prefix string, output io.Writer, dryRun bool) error {
 	white := color.New(color.FgWhite).SprintFunc()
 
 	// 输出增加前缀
-	fmt.Fprintf(output, "%s%s %s ...\n", prefix, cyan("[STEP]"), white(step.Name))
+	fmt.Fprintf(output, "%s%s %s %s ...\n", prefix, cyan("▶ [STEP]"), white(step.Name), cyan("…"))
 
 	// 1. Check
-	fmt.Fprintf(output, "%s  └─ 检查中... ", prefix)
+	fmt.Fprintf(output, "%s  └─ %s 检查中... ", prefix, cyan("🔍"))
 	ok, err := step.Check()
 	if err != nil {
-		fmt.Fprintf(output, "%s\n", red("错误"))
+		fmt.Fprintf(output, "%s\n", red("✖ 错误"))
 		fmt.Fprintf(output, "%s     Error: %v\n", prefix, err)
 		return err
 	}
 
 	if ok {
-		fmt.Fprintf(output, "%s\n", green("可跳过"))
+		fmt.Fprintf(output, "%s\n", green("⏭ 可跳过"))
 		return nil
 	}
-	fmt.Fprintf(output, "%s\n", yellow("待执行"))
+	fmt.Fprintf(output, "%s\n", yellow("⏳ 待执行"))
 
 	if dryRun {
-		fmt.Fprintf(output, "%s  └─ %s (%v)\n", prefix, yellow("预检查跳过"), time.Since(start).Round(time.Millisecond))
+		fmt.Fprintf(output, "%s  └─ %s (%v)\n", prefix, yellow("⏭ 预检查跳过"), time.Since(start).Round(time.Millisecond))
 		return nil
 	}
 
 	// 2. Action
-	fmt.Fprintf(output, "%s  └─ 正在执行...   ", prefix)
+	fmt.Fprintf(output, "%s  └─ %s 正在执行...   ", prefix, cyan("🚀"))
 	if err := step.Action(); err != nil {
-		fmt.Fprintf(output, "%s (%v)\n", red("错误"), time.Since(start).Round(time.Second))
+		fmt.Fprintf(output, "%s (%v)\n", red("✖ 错误"), time.Since(start).Round(time.Second))
 		fmt.Fprintf(output, "%s     Error: %v\n", prefix, err)
 		return err
 	}
 
-	fmt.Fprintf(output, "%s %s (%v)\n", green("完成"), prefix, time.Since(start).Round(time.Millisecond))
+	fmt.Fprintf(output, "%s %s (%v)\n", green("✔ 完成"), prefix, time.Since(start).Round(time.Millisecond))
 	return nil
 }
