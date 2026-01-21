@@ -48,11 +48,13 @@ func main() {
 		}
 	}
 
-	workerResults := runWorkersSequentially(cfg, os.Stdout, *dryRun)
-	results = append(results, workerResults...)
-	for _, result := range workerResults {
-		if result.Err != nil && runErr == nil {
-			runErr = result.Err
+	if cfg.InstallMode == config.InstallModeFull {
+		workerResults := runWorkersSequentially(cfg, os.Stdout, *dryRun)
+		results = append(results, workerResults...)
+		for _, result := range workerResults {
+			if result.Err != nil && runErr == nil {
+				runErr = result.Err
+			}
 		}
 	}
 
@@ -137,6 +139,12 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 	if cfg.CommandTimeoutSeconds <= 0 {
 		cfg.CommandTimeoutSeconds = int((10 * time.Minute).Seconds())
 	}
+	if cfg.InstallMode == "" {
+		cfg.InstallMode = config.InstallModeFull
+	}
+	if !stringInSlice(cfg.InstallMode, config.SupportedInstallModes) {
+		return fmt.Errorf("Error: install_mode %s is not supported.", cfg.InstallMode)
+	}
 
 	versions := []struct {
 		name      string
@@ -147,6 +155,9 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 		{"Runc", &cfg.Versions.Runc, config.RuncVersions},
 		{"Nerdctl", &cfg.Versions.Nerdctl, config.NerdctlVersions},
 		{"Kubernetes", &cfg.Versions.K8s, config.K8sVersions},
+		{"Kube-OVN", &cfg.Addons.KubeOvn.Version, config.KubeOvnVersions},
+		{"Multus CNI", &cfg.Addons.MultusCNI.Version, config.MultusCNIVersions},
+		{"Local Path Storage", &cfg.Addons.LocalPathStorage.Version, config.LocalPathStorageVersions},
 	}
 
 	for _, v := range versions {
@@ -175,8 +186,8 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 			break
 		}
 	}
-	if !hasMaster && cfg.JoinCommand == "" {
-		return fmt.Errorf("Error: join command is required.")
+	if !hasMaster {
+		return fmt.Errorf("Error: master node is required.")
 	}
 
 	return nil

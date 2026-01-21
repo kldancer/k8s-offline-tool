@@ -143,6 +143,9 @@ func (m *Manager) distributeResources() error {
 		if !m.context.HasGPU && strings.Contains(p, "nvidia-container-toolkit") {
 			return true
 		}
+		if !m.shouldIncludeAddonPath(p, isDir) {
+			return true
+		}
 		return false
 	}
 
@@ -255,90 +258,329 @@ func (m *Manager) Run(dryRun bool) error {
 			},
 			Action: m.distributeResources,
 		},
-		{
-			Name:   "禁用 SELinux",
-			Check:  m.installer.CheckSELinux,
-			Action: m.installer.DisableSELinux,
-		},
-		{
-			Name:   "禁用 Firewall",
-			Check:  m.installer.CheckFirewall,
-			Action: m.installer.DisableFirewall,
-		},
-		{
-			Name:   "禁用 Swap分区",
-			Check:  m.installer.CheckSwap,
-			Action: m.installer.DisableSwap,
-		},
-		{
-			Name:   "加载内核模块",
-			Check:  m.installer.CheckKernelModules,
-			Action: m.installer.LoadKernelModules,
-		},
-		{
-			Name:   "配置 Sysctl 内核参数",
-			Check:  m.installer.CheckSysctl,
-			Action: m.installer.ConfigureSysctl,
-		},
-		{
-			Name: "安装常用工具",
-			Check: func() (bool, error) {
-				if !m.nodeCfg.InstallTools {
-					return true, nil
-				}
-				return m.installer.CheckCommonTools()
-			},
-			Action: m.installer.InstallCommonTools,
-		},
-		{
-			Name:   "安装 Containerd 二进制文件",
-			Check:  m.installer.CheckContainerdBinaries,
-			Action: m.installer.InstallContainerdBinaries,
-		},
-		{
-			Name:   "安装 Runc",
-			Check:  m.installer.CheckRunc,
-			Action: m.installer.InstallRunc,
-		},
-		{
-			Name:   "配置 Containerd 服务",
-			Check:  m.installer.CheckContainerdService,
-			Action: m.installer.ConfigureContainerdService,
-		},
-		{
-			Name:   "配置cgroup、私有镜像仓库并启动 Containerd",
-			Check:  m.installer.CheckContainerdRunning,
-			Action: m.installer.ConfigureAndStartContainerd,
-		},
-		{
-			Name:   "配置 Crictl 默认endpoint",
-			Check:  m.installer.CheckCrictl,
-			Action: m.installer.ConfigureCrictl,
-		},
-		{
-			Name:   "安装 Nerdctl",
-			Check:  m.installer.CheckNerdctl,
-			Action: m.installer.InstallNerdctl,
-		},
-		{
-			Name:   "配置 GPU 运行时",
-			Check:  m.installer.CheckGPUConfig,
-			Action: m.installer.ConfigureGPU,
-		},
-		{
-			Name:   "安装 Kubernetes 组件",
-			Check:  m.installer.CheckK8sComponents,
-			Action: m.installer.InstallK8sComponents,
-		},
-		{
-			Name:   "初始化或加入集群",
-			Check:  m.checkClusterStatus,
-			Action: m.runKubeadm,
-		},
 	}
+
+	if m.globalCfg.InstallMode == config.InstallModeFull {
+		steps = append(steps,
+			runner.Step{
+				Name:   "禁用 SELinux",
+				Check:  m.installer.CheckSELinux,
+				Action: m.installer.DisableSELinux,
+			},
+			runner.Step{
+				Name:   "禁用 Firewall",
+				Check:  m.installer.CheckFirewall,
+				Action: m.installer.DisableFirewall,
+			},
+			runner.Step{
+				Name:   "禁用 Swap分区",
+				Check:  m.installer.CheckSwap,
+				Action: m.installer.DisableSwap,
+			},
+			runner.Step{
+				Name:   "加载内核模块",
+				Check:  m.installer.CheckKernelModules,
+				Action: m.installer.LoadKernelModules,
+			},
+			runner.Step{
+				Name:   "配置 Sysctl 内核参数",
+				Check:  m.installer.CheckSysctl,
+				Action: m.installer.ConfigureSysctl,
+			},
+			runner.Step{
+				Name: "安装常用工具",
+				Check: func() (bool, error) {
+					if !m.nodeCfg.InstallTools {
+						return true, nil
+					}
+					return m.installer.CheckCommonTools()
+				},
+				Action: m.installer.InstallCommonTools,
+			},
+			runner.Step{
+				Name:   "安装 Containerd 二进制文件",
+				Check:  m.installer.CheckContainerdBinaries,
+				Action: m.installer.InstallContainerdBinaries,
+			},
+			runner.Step{
+				Name:   "安装 Runc",
+				Check:  m.installer.CheckRunc,
+				Action: m.installer.InstallRunc,
+			},
+			runner.Step{
+				Name:   "配置 Containerd 服务",
+				Check:  m.installer.CheckContainerdService,
+				Action: m.installer.ConfigureContainerdService,
+			},
+			runner.Step{
+				Name:   "配置cgroup、私有镜像仓库并启动 Containerd",
+				Check:  m.installer.CheckContainerdRunning,
+				Action: m.installer.ConfigureAndStartContainerd,
+			},
+			runner.Step{
+				Name:   "配置 Crictl 默认endpoint",
+				Check:  m.installer.CheckCrictl,
+				Action: m.installer.ConfigureCrictl,
+			},
+			runner.Step{
+				Name:   "安装 Nerdctl",
+				Check:  m.installer.CheckNerdctl,
+				Action: m.installer.InstallNerdctl,
+			},
+			runner.Step{
+				Name:   "配置 GPU 运行时",
+				Check:  m.installer.CheckGPUConfig,
+				Action: m.installer.ConfigureGPU,
+			},
+			runner.Step{
+				Name:   "安装 Kubernetes 组件",
+				Check:  m.installer.CheckK8sComponents,
+				Action: m.installer.InstallK8sComponents,
+			},
+			runner.Step{
+				Name:   "初始化或加入集群",
+				Check:  m.checkClusterStatus,
+				Action: m.runKubeadm,
+			},
+		)
+	}
+
+	steps = append(steps, m.addonSteps()...)
 
 	// 调用 Runner，传入前缀
 	return runner.RunPipeline(steps, prefix, m.output, dryRun)
+}
+
+func (m *Manager) addonSteps() []runner.Step {
+	return []runner.Step{
+		{
+			Name: "同步镜像到私有仓库",
+			Check: func() (bool, error) {
+				if !m.nodeCfg.IsMaster || m.globalCfg.Registry.Endpoint == "" {
+					return true, nil
+				}
+				return false, nil
+			},
+			Action: m.syncImagesToRegistry,
+		},
+		{
+			Name: "部署 Kube-OVN CNI",
+			Check: func() (bool, error) {
+				if !m.nodeCfg.IsMaster || !m.globalCfg.Addons.KubeOvn.Enabled {
+					return true, nil
+				}
+				return false, nil
+			},
+			Action: m.deployKubeOvn,
+		},
+		{
+			Name: "部署 Multus CNI",
+			Check: func() (bool, error) {
+				if !m.nodeCfg.IsMaster || !m.globalCfg.Addons.MultusCNI.Enabled {
+					return true, nil
+				}
+				return false, nil
+			},
+			Action: m.deployMultusCNI,
+		},
+		{
+			Name: "部署 Local Path Storage",
+			Check: func() (bool, error) {
+				if !m.nodeCfg.IsMaster || !m.globalCfg.Addons.LocalPathStorage.Enabled {
+					return true, nil
+				}
+				return false, nil
+			},
+			Action: m.deployLocalPathStorage,
+		},
+	}
+}
+
+func (m *Manager) registryHost() (string, bool) {
+	if strings.TrimSpace(m.globalCfg.Registry.Endpoint) == "" {
+		return "", false
+	}
+	return fmt.Sprintf("%s:%d", m.globalCfg.Registry.Endpoint, m.globalCfg.Registry.Port), true
+}
+
+func (m *Manager) imageClient() (string, error) {
+	if _, err := m.context.RunCmd("nerdctl --version"); err == nil {
+		return "nerdctl", nil
+	}
+	if _, err := m.context.RunCmd("ctr version"); err == nil {
+		return "ctr", nil
+	}
+	return "", fmt.Errorf("nerdctl or ctr is required to sync images")
+}
+
+func (m *Manager) syncImagesToRegistry() error {
+	registryHost, ok := m.registryHost()
+	if !ok {
+		return nil
+	}
+	client, err := m.imageClient()
+	if err != nil {
+		return err
+	}
+	for _, image := range config.RequiredImages {
+		target := replaceImageRegistry(image, registryHost)
+		repo, tag := splitImage(target)
+		repoPath := strings.TrimPrefix(repo, registryHost+"/")
+		checkCmd := fmt.Sprintf("curl -sf -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' http://%s/v2/%s/manifests/%s > /dev/null", registryHost, repoPath, tag)
+		if _, err := m.context.RunCmd(checkCmd); err == nil {
+			continue
+		}
+		switch client {
+		case "nerdctl":
+			if _, err := m.context.RunCmd(fmt.Sprintf("nerdctl pull %s", image)); err != nil {
+				return err
+			}
+			if _, err := m.context.RunCmd(fmt.Sprintf("nerdctl tag %s %s", image, target)); err != nil {
+				return err
+			}
+			if _, err := m.context.RunCmd(fmt.Sprintf("nerdctl --insecure-registry push %s", target)); err != nil {
+				return err
+			}
+		case "ctr":
+			if _, err := m.context.RunCmd(fmt.Sprintf("ctr images pull %s", image)); err != nil {
+				return err
+			}
+			if _, err := m.context.RunCmd(fmt.Sprintf("ctr images tag %s %s", image, target)); err != nil {
+				return err
+			}
+			if _, err := m.context.RunCmd(fmt.Sprintf("ctr images push --plain-http %s", target)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (m *Manager) ensureAdminConf() error {
+	_, err := m.context.RunCmd("test -f /etc/kubernetes/admin.conf")
+	if err != nil {
+		return fmt.Errorf("admin.conf not found on master node")
+	}
+	return nil
+}
+
+func (m *Manager) deployKubeOvn() error {
+	if err := m.ensureAdminConf(); err != nil {
+		return err
+	}
+	versionDir := versionToDir(m.globalCfg.Addons.KubeOvn.Version)
+	installDir := path.Join(m.context.RemoteTmpDir, "cni", "kube-ovn", versionDir)
+	installScript := path.Join(installDir, "install.sh")
+	if registryHost, ok := m.registryHost(); ok {
+		registry := registryHost + "/kubeovn"
+		cmd := fmt.Sprintf("sed -i 's|^REGISTRY=.*|REGISTRY=\"%s\"|' %s", registry, installScript)
+		if _, err := m.context.RunCmd(cmd); err != nil {
+			return err
+		}
+	}
+	cmd := fmt.Sprintf("chmod +x %s && KUBECONFIG=/etc/kubernetes/admin.conf %s", installScript, installScript)
+	_, err := m.context.RunCmd(cmd)
+	return err
+}
+
+func (m *Manager) deployMultusCNI() error {
+	if err := m.ensureAdminConf(); err != nil {
+		return err
+	}
+	manifestPath := path.Join(m.context.RemoteTmpDir, "cni", "multus-cni ", "multus-daemonset-thick.yml")
+	if registryHost, ok := m.registryHost(); ok {
+		image := registryHost + "/k8snetworkplumbingwg/multus-cni:snapshot-thick"
+		cmd := fmt.Sprintf("sed -i 's|ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick|%s|g' %s", image, manifestPath)
+		if _, err := m.context.RunCmd(cmd); err != nil {
+			return err
+		}
+	}
+	cmd := fmt.Sprintf("KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f %s", manifestPath)
+	_, err := m.context.RunCmd(cmd)
+	return err
+}
+
+func (m *Manager) deployLocalPathStorage() error {
+	if err := m.ensureAdminConf(); err != nil {
+		return err
+	}
+	versionDir := versionToDir(m.globalCfg.Addons.LocalPathStorage.Version)
+	manifestPath := path.Join(m.context.RemoteTmpDir, "local-path-provisioner", versionDir, "local-path-storage.yaml")
+	if registryHost, ok := m.registryHost(); ok {
+		image := registryHost + "/rancher/local-path-provisioner:v0.0.34"
+		cmd := fmt.Sprintf("sed -i 's|rancher/local-path-provisioner:v0.0.34|%s|g' %s", image, manifestPath)
+		if _, err := m.context.RunCmd(cmd); err != nil {
+			return err
+		}
+	}
+	cmd := fmt.Sprintf("KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f %s", manifestPath)
+	_, err := m.context.RunCmd(cmd)
+	return err
+}
+
+func (m *Manager) shouldIncludeAddonPath(p string, isDir bool) bool {
+	if m.globalCfg.InstallMode == config.InstallModeAddonsOnly {
+		if !m.isAddonPath(p) {
+			return false
+		}
+		return m.isAddonPathEnabled(p, isDir)
+	}
+	if m.isAddonPath(p) {
+		return m.isAddonPathEnabled(p, isDir)
+	}
+	return true
+}
+
+func (m *Manager) isAddonPath(p string) bool {
+	return p == "cni" ||
+		strings.HasPrefix(p, "cni/kube-ovn") ||
+		strings.HasPrefix(p, "cni/multus-cni ") ||
+		strings.HasPrefix(p, "local-path-provisioner")
+}
+
+func (m *Manager) isAddonPathEnabled(p string, isDir bool) bool {
+	if p == "cni" {
+		return m.globalCfg.Addons.KubeOvn.Enabled || m.globalCfg.Addons.MultusCNI.Enabled
+	}
+	if strings.HasPrefix(p, "cni/kube-ovn") {
+		if !m.globalCfg.Addons.KubeOvn.Enabled {
+			return false
+		}
+		versionDir := path.Join("cni", "kube-ovn", versionToDir(m.globalCfg.Addons.KubeOvn.Version))
+		return p == "cni/kube-ovn" || p == versionDir || strings.HasPrefix(p, versionDir+"/")
+	}
+	if strings.HasPrefix(p, "cni/multus-cni ") {
+		return m.globalCfg.Addons.MultusCNI.Enabled
+	}
+	if strings.HasPrefix(p, "local-path-provisioner") {
+		if !m.globalCfg.Addons.LocalPathStorage.Enabled {
+			return false
+		}
+		versionDir := path.Join("local-path-provisioner", versionToDir(m.globalCfg.Addons.LocalPathStorage.Version))
+		return p == "local-path-provisioner" || p == versionDir || strings.HasPrefix(p, versionDir+"/")
+	}
+	return false
+}
+
+func versionToDir(version string) string {
+	return strings.ReplaceAll(version, ".", "-")
+}
+
+func splitImage(image string) (string, string) {
+	lastSlash := strings.LastIndex(image, "/")
+	lastColon := strings.LastIndex(image, ":")
+	if lastColon > lastSlash {
+		return image[:lastColon], image[lastColon+1:]
+	}
+	return image, "latest"
+}
+
+func replaceImageRegistry(image, registry string) string {
+	parts := strings.SplitN(image, "/", 2)
+	if len(parts) < 2 {
+		return registry + "/" + image
+	}
+	return registry + "/" + parts[1]
 }
 
 func (m *Manager) checkClusterStatus() (bool, error) {
