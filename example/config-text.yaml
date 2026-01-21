@@ -4,6 +4,23 @@ registry:
   port: 40443
   ip: 192.168.1.7
 
+# 安装模式：
+# - full: 从零安装并初始化集群
+# - addons-only: 在已有集群中仅部署组件
+install_mode: "full"
+
+# 组件部署配置（默认不启用）
+addons:
+  kube_ovn:
+    enabled: false
+    version: "1.15.0"
+  multus_cni:
+    enabled: false
+    version: "snapshot-thick"
+  local_path_storage:
+    enabled: false
+    version: "0.0.34"
+
 # 命令执行超时（秒）
 # command_timeout_seconds: 600
 

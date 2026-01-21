@@ -4,12 +4,15 @@ type Config struct {
 	// 全局配置
 	Registry RegistryConfig `yaml:"registry"`
 	Versions VersionConfig  `yaml:"versions"`
+	Addons   AddonsConfig   `yaml:"addons"`
 
 	// 默认 SSH 配置 (如果 Node 中未指定则使用此默认值)
 	SSHPort int    `yaml:"ssh_port"`
 	User    string `yaml:"user"`
 	// 命令执行超时（秒）
 	CommandTimeoutSeconds int `yaml:"command_timeout_seconds"`
+	// 安装模式：full(从零安装) 或 addons-only(仅部署组件)
+	InstallMode string `yaml:"install_mode"`
 
 	// 节点列表
 	Nodes       []NodeConfig `yaml:"nodes"`
@@ -35,4 +38,15 @@ type VersionConfig struct {
 	Runc       string `yaml:"runc"`
 	Nerdctl    string `yaml:"nerdctl"`
 	K8s        string `yaml:"k8s"`
+}
+
+type AddonsConfig struct {
+	KubeOvn          AddonComponentConfig `yaml:"kube_ovn"`
+	MultusCNI        AddonComponentConfig `yaml:"multus_cni"`
+	LocalPathStorage AddonComponentConfig `yaml:"local_path_storage"`
+}
+
+type AddonComponentConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Version string `yaml:"version"`
 }
