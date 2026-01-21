@@ -438,7 +438,8 @@ func (m *Manager) syncImagesToRegistry() error {
 			if _, err := m.context.RunCmd(fmt.Sprintf("nerdctl tag %s %s", image, target)); err != nil {
 				return err
 			}
-			if _, err := m.context.RunCmd(fmt.Sprintf("nerdctl --insecure-registry push %s", target)); err != nil {
+			// 不用添加 --insecure-registry，因为已经配置了http
+			if _, err := m.context.RunCmd(fmt.Sprintf("nerdctl  push %s", target)); err != nil {
 				return err
 			}
 		case "ctr":
@@ -478,7 +479,7 @@ func (m *Manager) deployKubeOvn() error {
 			return err
 		}
 	}
-	cmd := fmt.Sprintf("chmod +x %s && KUBECONFIG=/etc/kubernetes/admin.conf %s", installScript, installScript)
+	cmd := fmt.Sprintf("bash %s ", installScript)
 	_, err := m.context.RunCmd(cmd)
 	return err
 }
@@ -495,7 +496,7 @@ func (m *Manager) deployMultusCNI() error {
 			return err
 		}
 	}
-	cmd := fmt.Sprintf("KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f %s", manifestPath)
+	cmd := fmt.Sprintf("kubectl apply -f %s", manifestPath)
 	_, err := m.context.RunCmd(cmd)
 	return err
 }
@@ -513,7 +514,7 @@ func (m *Manager) deployLocalPathStorage() error {
 			return err
 		}
 	}
-	cmd := fmt.Sprintf("KUBECONFIG=/etc/kubernetes/admin.conf kubectl apply -f %s", manifestPath)
+	cmd := fmt.Sprintf("kubectl apply -f %s", manifestPath)
 	_, err := m.context.RunCmd(cmd)
 	return err
 }

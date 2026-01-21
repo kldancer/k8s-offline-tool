@@ -17,6 +17,9 @@ type Config struct {
 	// 节点列表
 	Nodes       []NodeConfig `yaml:"nodes"`
 	JoinCommand string       `yaml:"join_command"` // 供 Worker 节点使用的全局 Join 命令
+
+	// 仅执行预检查，不执行安装动作
+	DryRun bool `yaml:"dry_run"`
 }
 
 type NodeConfig struct {

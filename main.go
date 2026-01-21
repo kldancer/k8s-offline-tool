@@ -16,8 +16,7 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "", "配置文件路径。e.g. config.yaml")
-	dryRun := flag.Bool("dry-run", false, "仅执行预检查，不执行安装动作")
+	cfgPath := flag.String("config", "config.yaml", "配置文件路径。e.g. config.yaml")
 	flag.Parse()
 
 	// 1. 加载配置
@@ -28,7 +27,7 @@ func main() {
 	}
 
 	runMode := "安装"
-	if *dryRun {
+	if cfg.DryRun {
 		runMode = "预检查"
 	}
 	fmt.Printf("开始%s %d 个节点...\n\n", runMode, len(cfg.Nodes))
@@ -41,7 +40,7 @@ func main() {
 		if !cfg.Nodes[i].IsMaster {
 			continue
 		}
-		result := runNode(cfg, i, os.Stdout, *dryRun)
+		result := runNode(cfg, i, os.Stdout, cfg.DryRun)
 		results = append(results, result)
 		if result.Err != nil && runErr == nil {
 			runErr = result.Err
@@ -49,7 +48,7 @@ func main() {
 	}
 
 	if cfg.InstallMode == config.InstallModeFull {
-		workerResults := runWorkersSequentially(cfg, os.Stdout, *dryRun)
+		workerResults := runWorkersSequentially(cfg, os.Stdout, cfg.DryRun)
 		results = append(results, workerResults...)
 		for _, result := range workerResults {
 			if result.Err != nil && runErr == nil {
@@ -58,7 +57,7 @@ func main() {
 		}
 	}
 
-	printSummary(results, *dryRun)
+	printSummary(results, cfg.DryRun)
 	if runErr != nil {
 		log.Fatal(runErr)
 	}
@@ -109,10 +108,35 @@ func managerRun(cfg *config.Config, i int, writer io.Writer, dryRun bool) error 
 }
 
 func loadConfig(path string) *config.Config {
-	cfg := &config.Config{SSHPort: 22, User: "root"}
-	if strings.TrimSpace(path) == "" {
-		path = "config.yaml"
+	// 默认配置
+	cfg := &config.Config{
+		SSHPort: 22,
+		User:    "root",
+		Addons: config.AddonsConfig{
+			KubeOvn: config.AddonComponentConfig{
+				Enabled: false,
+				Version: config.KubeOvnVersions[0],
+			},
+			LocalPathStorage: config.AddonComponentConfig{
+				Enabled: false,
+				Version: config.LocalPathStorageVersions[0],
+			},
+			MultusCNI: config.AddonComponentConfig{
+				Enabled: false,
+				Version: config.MultusCNIVersions[0],
+			},
+		},
+		InstallMode:           config.InstallModeFull,
+		CommandTimeoutSeconds: int((600 * time.Second).Seconds()),
+		Versions: config.VersionConfig{
+			Containerd: config.ContainerdVersions[0],
+			Runc:       config.RuncVersions[0],
+			Nerdctl:    config.NerdctlVersions[0],
+			K8s:        config.K8sVersions[0],
+		},
+		DryRun: false,
 	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		log.Fatalf("Failed to read config file: %v", err)
@@ -186,8 +210,8 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 			break
 		}
 	}
-	if !hasMaster {
-		return fmt.Errorf("Error: master node is required.")
+	if !hasMaster && cfg.JoinCommand == "" {
+		return fmt.Errorf("Error: join command is required.")
 	}
 
 	return nil
