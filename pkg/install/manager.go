@@ -59,15 +59,36 @@ func (m *Manager) Close() {
 }
 
 func (m *Manager) detectEnv() error {
-	out, err := m.client.RunCommand("cat /etc/os-release")
-	if err != nil {
-		return fmt.Errorf("failed to read /etc/os-release: %v", err)
-	}
 
 	arch, err := m.client.DetectArch()
 	if err != nil {
 		return fmt.Errorf("failed to detect arch: %v", err)
 	}
+
+	// 获取系统名称
+	systemName := "unknown"
+	if verOut, err := m.client.RunCommand("grep '^NAME=' /etc/os-release | cut -d= -f2 | sed 's/\"//g'"); err == nil {
+		ver := strings.TrimSpace(verOut)
+		if ver != "" {
+			systemName = ver
+		}
+	}
+
+	// 获取系统版本
+	systemVersion := "unknown"
+	if verOut, err := m.client.RunCommand("grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | sed 's/\"//g'"); err == nil {
+		ver := strings.TrimSpace(verOut)
+		if ver != "" {
+			systemVersion = ver
+		}
+	}
+
+	// 获取内核版本
+	kernelVersion, err := m.client.RunCommand("uname -r")
+	if err != nil {
+		return fmt.Errorf("failed to detect kernel version: %v", err)
+	}
+	kernelVersion = strings.TrimSpace(kernelVersion)
 
 	hasGPU := false
 	if gpuOut, _ := m.client.RunCommand("lspci | grep -i nvidia"); gpuOut != "" {
@@ -75,20 +96,23 @@ func (m *Manager) detectEnv() error {
 	}
 
 	m.context = &strategy.Context{
-		Cfg:          m.globalCfg, // 注意：Context 中传递 Global 配置用于获取 Registry/Versions
-		Arch:         arch,
-		HasGPU:       hasGPU,
-		RemoteTmpDir: config.RemoteTmpDir,
-		RunCmd:       m.client.RunCommand,
+		Cfg:           m.globalCfg, // 注意：Context 中传递 Global 配置用于获取 Registry/Versions
+		Arch:          arch,
+		SystemName:    systemName,
+		SystemVersion: systemVersion,
+		KernelVersion: kernelVersion,
+		HasGPU:        hasGPU,
+		RemoteTmpDir:  config.RemoteTmpDir,
+		RunCmd:        m.client.RunCommand,
 	}
 
-	osInfo := strings.ToLower(out)
+	osInfo := strings.ToLower(systemName)
 	if strings.Contains(osInfo, "fedora") || strings.Contains(osInfo, "centos") {
 		m.installer = &strategy.FedoraInstaller{Ctx: m.context}
 	} else if strings.Contains(osInfo, "ubuntu") || strings.Contains(osInfo, "debian") {
 		m.installer = &strategy.UbuntuInstaller{Ctx: m.context}
 	} else {
-		return fmt.Errorf("unsupported OS: %s", out)
+		return fmt.Errorf("unsupported OS: %s", osInfo)
 	}
 	return nil
 }
@@ -214,8 +238,10 @@ func (m *Manager) Run(dryRun bool) error {
 	}
 
 	// 定义日志前缀
+	fmt.Printf("----------------------------------------------------------------------------------------\n")
 	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
-	fmt.Fprintf(m.output, "%sDetected: %s | Arch: %s | GPU: %v\n", prefix, m.installer.Name(), m.context.Arch, m.context.HasGPU)
+	fmt.Fprintf(m.output, "%s检测到 %s %s | KernelVersion: %s | Arch: %s | GPU: %v\n", prefix,
+		m.context.SystemName, m.context.SystemVersion, m.context.KernelVersion, m.context.Arch, m.context.HasGPU)
 
 	steps := []runner.Step{
 		{
@@ -303,11 +329,6 @@ func (m *Manager) Run(dryRun bool) error {
 			Name:   "安装 Kubernetes 组件",
 			Check:  m.installer.CheckK8sComponents,
 			Action: m.installer.InstallK8sComponents,
-		},
-		{
-			Name:   "加载镜像",
-			Check:  m.installer.CheckImages,
-			Action: m.installer.LoadImages,
 		},
 		{
 			Name:   "初始化或加入集群",

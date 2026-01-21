@@ -132,17 +132,3 @@ func (u *UbuntuInstaller) InstallK8sComponents() error {
 	u.Ctx.RunCmd("systemctl start kubelet")
 	return err
 }
-
-func (u *UbuntuInstaller) CheckImages() (bool, error) {
-	if u.Ctx.Cfg.Registry.Endpoint != "" {
-		// 如果配置了私有仓库，默认跳过检查
-		return true, nil
-	}
-	out, _ := u.Ctx.RunCmd("ctr -n k8s.io images list | grep kube-apiserver")
-	return strings.TrimSpace(out) != "", nil
-}
-func (u *UbuntuInstaller) LoadImages() error {
-	cmd := fmt.Sprintf("find %s/images -name '*.tar' -exec ctr -n k8s.io images import {} \\;", u.Ctx.RemoteTmpDir)
-	_, err := u.Ctx.RunCmd(cmd)
-	return err
-}

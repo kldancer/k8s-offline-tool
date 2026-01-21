@@ -168,6 +168,17 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 		}
 	}
 
+	hasMaster := false
+	for i := range cfg.Nodes {
+		if cfg.Nodes[i].IsMaster {
+			hasMaster = true
+			break
+		}
+	}
+	if !hasMaster && cfg.JoinCommand == "" {
+		return fmt.Errorf("Error: join command is required.")
+	}
+
 	return nil
 }
 

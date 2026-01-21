@@ -21,17 +21,17 @@ registry:
 
 # 节点列表（按顺序进行安装）
 nodes:
-  - ip: "192.168.31.203"
+  - ip: "192.168.1.8"
     password: "root"
     ssh_port: 22
     is_master: true
     install_tools: true
-  - ip: "192.168.31.133"
+  - ip: "192.168.1.10"
     password: "root"
     ssh_port: 22
     is_master: false
     install_tools: true
-  - ip: "192.168.31.191"
+  - ip: "192.168.1.11"
     password: "root"
     ssh_port: 22
     is_master: false

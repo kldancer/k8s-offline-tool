@@ -143,17 +143,3 @@ func (f *FedoraInstaller) InstallK8sComponents() error {
 	f.Ctx.RunCmd("systemctl start kubelet")
 	return err
 }
-
-func (f *FedoraInstaller) CheckImages() (bool, error) {
-	if f.Ctx.Cfg.Registry.Endpoint != "" {
-		// 如果配置了私有仓库，默认跳过检查
-		return true, nil
-	}
-	out, _ := f.Ctx.RunCmd("ctr -n k8s.io images list | grep kube-apiserver")
-	return strings.TrimSpace(out) != "", nil
-}
-func (f *FedoraInstaller) LoadImages() error {
-	cmd := fmt.Sprintf("find %s/images -name '*.tar' -exec ctr -n k8s.io images import {} \\;", f.Ctx.RemoteTmpDir)
-	_, err := f.Ctx.RunCmd(cmd)
-	return err
-}

@@ -31,10 +31,9 @@ func runStep(step Step, prefix string, output io.Writer, dryRun bool) error {
 	green := color.New(color.FgGreen).SprintFunc()
 	yellow := color.New(color.FgYellow).SprintFunc()
 	red := color.New(color.FgRed).SprintFunc()
-	white := color.New(color.FgWhite).SprintFunc()
 
 	// 输出增加前缀
-	fmt.Fprintf(output, "%s%s %s %s ...\n", prefix, cyan("▶ [STEP]"), white(step.Name), cyan("…"))
+	fmt.Fprintf(output, "%s%s %s %s ...\n", prefix, cyan("▶ [STEP]"), step.Name, cyan("…"))
 
 	// 1. Check
 	fmt.Fprintf(output, "%s  └─ %s 检查中... ", prefix, cyan("🔍"))

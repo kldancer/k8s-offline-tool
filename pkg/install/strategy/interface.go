@@ -47,16 +47,15 @@ type NodeInstaller interface {
 	// K8s
 	CheckK8sComponents() (bool, error)
 	InstallK8sComponents() error
-
-	// Images
-	CheckImages() (bool, error)
-	LoadImages() error
 }
 
 type Context struct {
-	Cfg          *config.Config
-	Arch         string
-	HasGPU       bool
-	RemoteTmpDir string
-	RunCmd       func(string) (string, error)
+	Cfg           *config.Config
+	Arch          string
+	SystemName    string
+	SystemVersion string
+	KernelVersion string
+	HasGPU        bool
+	RemoteTmpDir  string
+	RunCmd        func(string) (string, error)
 }
