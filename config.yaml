@@ -38,6 +38,8 @@ registry:
   endpoint: "jusuan.io"
   port: 80
   ip: 192.168.1.7
+  username: "admin"
+  password: "Harbor12345"
 
 # 节点列表（按顺序进行安装）
 nodes:
