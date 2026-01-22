@@ -14,11 +14,12 @@ var (
 var RemoteTmpDir = "/tmp/k8s-offline-install"
 
 const (
-	InstallModeFull       = "full"
-	InstallModeAddonsOnly = "addons-only"
+	InstallModeFull        = "full"
+	InstallModeAddonsOnly  = "addons-only"
+	InstallModeInstallOnly = "install-only"
 )
 
-var SupportedInstallModes = []string{InstallModeFull, InstallModeAddonsOnly}
+var SupportedInstallModes = []string{InstallModeFull, InstallModeAddonsOnly, InstallModeInstallOnly}
 
 var RequiredKubeOvnImages = []string{
 	"docker.io/kubeovn/kube-ovn:v1.15.0",

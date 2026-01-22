@@ -6,10 +6,11 @@
 ## 命令执行超时（秒）
 #command_timeout_seconds: 600
 #
-## 安装模式：
-## - full: 从零安装并初始化集群
-## - addons-only: 在已有集群中仅部署组件
-#install_mode: "full"
+# 安装模式：
+# - full: 从零安装并初始化集群
+# - addons-only: 在已有集群中仅部署组件
+# - install-only： 仅安装软件，不执行kubeadm init & join
+install_mode: "full"
 #
 ## 软件版本定义
 #versions:
@@ -36,7 +37,7 @@ dry_run: false
 # 私有仓库配置
 registry:
   endpoint: "jusuan.io"
-  port: 80
+  port: 8080
   ip: 192.168.1.7
   username: "admin"
   password: "Harbor12345"

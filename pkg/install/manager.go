@@ -30,6 +30,8 @@ type Manager struct {
 	output    io.Writer
 }
 
+var hasMirrorSync = false
+
 // NewManager 创建针对特定节点的管理器
 func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig, output io.Writer) (*Manager, error) {
 	if output == nil {
@@ -263,7 +265,7 @@ func (m *Manager) Run(dryRun bool) error {
 		},
 	}
 
-	if m.globalCfg.InstallMode == config.InstallModeFull {
+	if m.globalCfg.InstallMode != config.InstallModeAddonsOnly {
 		steps = append(steps,
 			runner.Step{
 				Name:   "禁用 SELinux",
@@ -316,7 +318,7 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.ConfigureContainerdService,
 			},
 			runner.Step{
-				Name:   "配置cgroup、私有镜像仓库并启动 Containerd",
+				Name:   "配置cgroup 并启动 Containerd",
 				Check:  m.installer.CheckContainerdRunning,
 				Action: m.installer.ConfigureAndStartContainerd,
 			},
@@ -330,26 +332,58 @@ func (m *Manager) Run(dryRun bool) error {
 				Check:  m.installer.CheckNerdctl,
 				Action: m.installer.InstallNerdctl,
 			},
+		)
+	}
+
+	if m.globalCfg.Registry.Endpoint != "" {
+		steps = append(steps,
+			runner.Step{
+				Name:   "配置私有镜像仓库,并重启 Containerd",
+				Check:  m.installer.CheckContainerdRunning,
+				Action: m.installer.ConfiguraRegistryContainerd,
+			},
+		)
+	}
+
+	if m.globalCfg.InstallMode != config.InstallModeAddonsOnly && m.context.HasGPU {
+		steps = append(steps,
 			runner.Step{
 				Name:   "配置 GPU 运行时",
 				Check:  m.installer.CheckGPUConfig,
 				Action: m.installer.ConfigureGPU,
 			},
-			runner.Step{
-				Name:   "安装 Kubernetes 组件",
-				Check:  m.installer.CheckK8sComponents,
-				Action: m.installer.InstallK8sComponents,
-			},
+		)
+	}
+
+	// full模式、addons模式下，需要同步镜像, 且同步镜像的操作只执行一次
+	if m.globalCfg.Registry.Endpoint != "" && m.globalCfg.InstallMode != config.InstallModeInstallOnly && !hasMirrorSync {
+		steps = append(steps,
 			runner.Step{
 				Name: "同步镜像到私有仓库",
 				Check: func() (bool, error) {
-					if !m.nodeCfg.IsMaster || m.globalCfg.Registry.Endpoint == "" {
+					if !m.nodeCfg.IsMaster {
 						return true, nil
 					}
 					return false, nil
 				},
 				Action: m.syncImagesToRegistry,
 			},
+		)
+	}
+
+	// 非addons模式下，需要安装Kubernetes 组件
+	if m.globalCfg.InstallMode != config.InstallModeAddonsOnly {
+		steps = append(steps,
+			runner.Step{
+				Name:   "安装 Kubernetes 组件",
+				Check:  m.installer.CheckK8sComponents,
+				Action: m.installer.InstallK8sComponents,
+			})
+	}
+
+	// full模式下，需要初始化或加入集群
+	if m.globalCfg.InstallMode == config.InstallModeFull {
+		steps = append(steps,
 			runner.Step{
 				Name:   "初始化或加入集群",
 				Check:  m.checkClusterStatus,
@@ -448,6 +482,7 @@ func (m *Manager) syncImagesToRegistry() error {
 		if err != nil {
 			return err
 		}
+		// 检查项目是否存在
 		if !projectCache[project] {
 			exists, err := m.harborProjectExists(registryHost, project)
 			if err != nil {
@@ -460,6 +495,7 @@ func (m *Manager) syncImagesToRegistry() error {
 			}
 			projectCache[project] = true
 		}
+		// 检查tag是否存在
 		tagExists, err := m.harborTagExists(registryHost, project, repoName, tag)
 		if err != nil {
 			return err
@@ -491,6 +527,7 @@ func (m *Manager) syncImagesToRegistry() error {
 			}
 		}
 	}
+	hasMirrorSync = true
 	return nil
 }
 

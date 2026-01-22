@@ -92,42 +92,44 @@ func ConfigureAndStartContainerd(ctx *Context) error {
 	// 2. 修改 SystemdCgroup
 	ctx.RunCmd("sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml")
 
-	// 3. 配置 Registry
-	if ctx.Cfg.Registry.Endpoint != "" {
-		// 3.1 启用 certs.d 目录配置
-		ctx.RunCmd("sed -i \"s|config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'|config_path = '/etc/containerd/certs.d'|g\" /etc/containerd/config.toml")
-		// 3.2 配置 hosts.toml
-		regDomain := ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", ctx.Cfg.Registry.Port)
+	// 3. 启动服务
+	ctx.RunCmd("systemctl daemon-reload")
+	_, err := ctx.RunCmd("systemctl enable --now containerd")
+	return err
+}
 
-		// 3.3 修改 sandbox镜像
-		c := fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%s/google_containers/pause:3.10.1'|g\" /etc/containerd/config.toml", regDomain)
-		ctx.RunCmd(c)
+func ConfiguraRegistryContainerd(ctx *Context) error {
+	// 1.1 启用 certs.d 目录配置
+	ctx.RunCmd("sed -i \"s|config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'|config_path = '/etc/containerd/certs.d'|g\" /etc/containerd/config.toml")
+	// 1.2 配置 hosts.toml
+	regDomain := ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", ctx.Cfg.Registry.Port)
 
-		// 3.4 添加域名解析配置
-		ctx.RunCmd(fmt.Sprintf(" echo \"%s %s\" | sudo tee -a /etc/hosts", ctx.Cfg.Registry.IP, ctx.Cfg.Registry.Endpoint))
+	// 1.3 修改 sandbox镜像
+	c := fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%s/google_containers/pause:3.10.1'|g\" /etc/containerd/config.toml", regDomain)
+	ctx.RunCmd(c)
 
-		regUrl := "http://" + regDomain
+	// 1.4 添加域名解析配置
+	ctx.RunCmd(fmt.Sprintf(" echo \"%s %s\" | sudo tee -a /etc/hosts", ctx.Cfg.Registry.IP, ctx.Cfg.Registry.Endpoint))
 
-		// 创建目录
-		ctx.RunCmd(fmt.Sprintf("mkdir -p /etc/containerd/certs.d/%s", regDomain))
+	regUrl := "http://" + regDomain
 
-		// 写入 hosts.toml
-		hostsToml := fmt.Sprintf(`server = "%s"
+	// 创建目录
+	ctx.RunCmd(fmt.Sprintf("mkdir -p /etc/containerd/certs.d/%s", regDomain))
+
+	// 写入 hosts.toml
+	hostsToml := fmt.Sprintf(`server = "%s"
 
 [host."%s"]
   capabilities = ["pull", "resolve", "push"]
 `, regUrl, regUrl)
 
-		cmd := fmt.Sprintf("cat > /etc/containerd/certs.d/%s/hosts.toml <<EOF\n%s\nEOF", regDomain, hostsToml)
-		if _, err := ctx.RunCmd(cmd); err != nil {
-			return fmt.Errorf("failed to write hosts.toml: %v", err)
-		}
-
+	cmd := fmt.Sprintf("cat > /etc/containerd/certs.d/%s/hosts.toml <<EOF\n%s\nEOF", regDomain, hostsToml)
+	if _, err := ctx.RunCmd(cmd); err != nil {
+		return fmt.Errorf("failed to write hosts.toml: %v", err)
 	}
-
-	// 4. 启动服务
+	// 4. 重启服务
 	ctx.RunCmd("systemctl daemon-reload")
-	_, err := ctx.RunCmd("systemctl enable --now containerd")
+	_, err := ctx.RunCmd("systemctl restart containerd")
 	return err
 }
 

@@ -47,7 +47,7 @@ func main() {
 		}
 	}
 
-	if cfg.InstallMode == config.InstallModeFull {
+	if cfg.InstallMode != config.InstallModeAddonsOnly {
 		workerResults := runWorkersSequentially(cfg, os.Stdout, cfg.DryRun)
 		results = append(results, workerResults...)
 		for _, result := range workerResults {
@@ -163,9 +163,6 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 	if cfg.CommandTimeoutSeconds <= 0 {
 		cfg.CommandTimeoutSeconds = int((10 * time.Minute).Seconds())
 	}
-	if cfg.InstallMode == "" {
-		cfg.InstallMode = config.InstallModeFull
-	}
 	if !stringInSlice(cfg.InstallMode, config.SupportedInstallModes) {
 		return fmt.Errorf("Error: install_mode %s is not supported.", cfg.InstallMode)
 	}
@@ -210,6 +207,19 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 			break
 		}
 	}
+
+	if cfg.Registry.Endpoint != "" {
+		if cfg.Registry.IP == "" {
+			return fmt.Errorf("Error: registry ip is required.")
+		}
+		if cfg.Registry.Port == 0 {
+			return fmt.Errorf("Error: registry port is required.")
+		}
+		if cfg.Registry.Username == "" || cfg.Registry.Password == "" {
+			return fmt.Errorf("Error: registry username and password are required.")
+		}
+	}
+
 	if !hasMaster && cfg.JoinCommand == "" {
 		return fmt.Errorf("Error: join command is required.")
 	}

@@ -77,18 +77,18 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 
 #### 顶层字段
 
-| 字段 | 必填 | 默认值    | 说明 |
-| -- | --- |--------| --- |
-| `ssh_port` | 否 | `22`   | SSH 端口默认值，可被节点级配置覆盖。 |
-| `user` | 否 | `root` | SSH 用户名。 |
-| `command_timeout_seconds` | 否 | `600`  | 远程命令执行超时（秒）。 |
-| `install_mode` | 否 | `full` | 安装模式：`full` 为从零安装集群，`addons-only` 为仅部署组件。 |
-| `dry_run` | 否 | `false` | 仅执行预检查，不执行安装动作。 |
-| `versions` | 否 | 见下表    | 离线包版本配置。 |
-| `addons` | 否 | 见下表    | 组件启用与版本配置。 |
-| `registry` | 否 | 空      | 私有镜像仓库配置（Harbor），启用后会同步镜像并重写部署文件。 |
-| `nodes` | 是 | 见下表    | 节点列表，至少包含一个 `is_master: true` 的节点。 |
-| `join_command` | 否 | 空      | worker 加入集群时使用的命令。若未指定，会在 master 初始化后自动生成。 |
+| 字段 | 必填 | 默认值    | 说明                                                         |
+| -- | --- |--------|------------------------------------------------------------|
+| `ssh_port` | 否 | `22`   | SSH 端口默认值，可被节点级配置覆盖。                                       |
+| `user` | 否 | `root` | SSH 用户名。                                                   |
+| `command_timeout_seconds` | 否 | `600`  | 远程命令执行超时（秒）。                                               |
+| `install_mode` | 否 | `full` | 安装模式：`full` 为从零安装集群，`addons-only` 为仅部署组件, `install-only` 为仅安装软件，不执行kubeadm init & join |
+| `dry_run` | 否 | `false` | 仅执行预检查，不执行安装动作。                                            |
+| `versions` | 否 | 见下表    | 离线包版本配置。                                                   |
+| `addons` | 否 | 见下表    | 组件启用与版本配置。                                                 |
+| `registry` | 否 | 空      | 私有镜像仓库配置（Harbor），启用后会同步镜像并重写部署文件。                          |
+| `nodes` | 是 | 见下表    | 节点列表，至少包含一个 `is_master: true` 的节点。                         |
+| `join_command` | 否 | 空      | worker 加入集群时使用的命令。若未指定，会在 master 初始化后自动生成。                 |
 
 #### `versions`（支持版本）
 
@@ -118,8 +118,8 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 | `endpoint` | 是  | Harbor 域名（http）。               |
 | `port` | 是  | Harbor 端口。                     |
 | `ip` | 是  | Harbor 的 IP，用于写入 `/etc/hosts`。 |
-| `username` | 否  | Harbor 用户名，用于创建项目和查询镜像。 |
-| `password` | 否  | Harbor 密码。 |
+| `username` | 是  | Harbor 用户名，用于创建项目和查询镜像。 |
+| `password` | 是  | Harbor 密码。 |
 
 
 #### `nodes`
