@@ -338,6 +338,16 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.InstallK8sComponents,
 			},
 			runner.Step{
+				Name: "同步镜像到私有仓库",
+				Check: func() (bool, error) {
+					if !m.nodeCfg.IsMaster || m.globalCfg.Registry.Endpoint == "" {
+						return true, nil
+					}
+					return false, nil
+				},
+				Action: m.syncImagesToRegistry,
+			},
+			runner.Step{
 				Name:   "初始化或加入集群",
 				Check:  m.checkClusterStatus,
 				Action: m.runKubeadm,
@@ -345,7 +355,9 @@ func (m *Manager) Run(dryRun bool) error {
 		)
 	}
 
-	steps = append(steps, m.addonSteps()...)
+	if m.nodeCfg.IsMaster {
+		steps = append(steps, m.addonSteps()...)
+	}
 
 	// 调用 Runner，传入前缀
 	return runner.RunPipeline(steps, prefix, m.output, dryRun)
@@ -353,16 +365,6 @@ func (m *Manager) Run(dryRun bool) error {
 
 func (m *Manager) addonSteps() []runner.Step {
 	return []runner.Step{
-		{
-			Name: "同步镜像到私有仓库",
-			Check: func() (bool, error) {
-				if !m.nodeCfg.IsMaster || m.globalCfg.Registry.Endpoint == "" {
-					return true, nil
-				}
-				return false, nil
-			},
-			Action: m.syncImagesToRegistry,
-		},
 		{
 			Name: "部署 Kube-OVN CNI",
 			Check: func() (bool, error) {
@@ -422,7 +424,19 @@ func (m *Manager) syncImagesToRegistry() error {
 	if err != nil {
 		return err
 	}
-	for _, image := range config.RequiredImages {
+	images := config.RequiredK8sImages
+
+	if m.globalCfg.Addons.KubeOvn.Enabled {
+		images = append(images, config.RequiredKubeOvnImages...)
+	}
+	if m.globalCfg.Addons.MultusCNI.Enabled {
+		images = append(images, config.RequiredMultusCNImages...)
+	}
+	if m.globalCfg.Addons.LocalPathStorage.Enabled {
+		images = append(images, config.RequiredLocalPathProvisionerImages...)
+	}
+
+	for _, image := range images {
 		target := replaceImageRegistry(image, registryHost)
 		repo, tag := splitImage(target)
 		repoPath := strings.TrimPrefix(repo, registryHost+"/")
@@ -488,7 +502,7 @@ func (m *Manager) deployMultusCNI() error {
 	if err := m.ensureAdminConf(); err != nil {
 		return err
 	}
-	manifestPath := path.Join(m.context.RemoteTmpDir, "cni", "multus-cni ", "multus-daemonset-thick.yml")
+	manifestPath := path.Join(m.context.RemoteTmpDir, "cni", "multus-cni", "multus-daemonset-thick.yml")
 	if registryHost, ok := m.registryHost(); ok {
 		image := registryHost + "/k8snetworkplumbingwg/multus-cni:snapshot-thick"
 		cmd := fmt.Sprintf("sed -i 's|ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick|%s|g' %s", image, manifestPath)
@@ -535,7 +549,7 @@ func (m *Manager) shouldIncludeAddonPath(p string, isDir bool) bool {
 func (m *Manager) isAddonPath(p string) bool {
 	return p == "cni" ||
 		strings.HasPrefix(p, "cni/kube-ovn") ||
-		strings.HasPrefix(p, "cni/multus-cni ") ||
+		strings.HasPrefix(p, "cni/multus-cni") ||
 		strings.HasPrefix(p, "local-path-provisioner")
 }
 
@@ -550,7 +564,7 @@ func (m *Manager) isAddonPathEnabled(p string, isDir bool) bool {
 		versionDir := path.Join("cni", "kube-ovn", versionToDir(m.globalCfg.Addons.KubeOvn.Version))
 		return p == "cni/kube-ovn" || p == versionDir || strings.HasPrefix(p, versionDir+"/")
 	}
-	if strings.HasPrefix(p, "cni/multus-cni ") {
+	if strings.HasPrefix(p, "cni/multus-cni") {
 		return m.globalCfg.Addons.MultusCNI.Enabled
 	}
 	if strings.HasPrefix(p, "local-path-provisioner") {
@@ -617,7 +631,7 @@ func (m *Manager) runKubeadm() error {
 		}
 		//fmt.Fprintf(m.output, "[%s] Init Result:\n%s\n", m.nodeCfg.IP, out)
 
-		m.client.RunCommand("mkdir -p $HOME/.kube && cp -i /etc/kubernetes/admin.conf $HOME/.kube/config && chown $(id -u):$(id -g) $HOME/.kube/config")
+		m.client.RunCommand("mkdir -p $HOME/.kube && cp -f /etc/kubernetes/admin.conf $HOME/.kube/config && chown $(id -u):$(id -g) $HOME/.kube/config")
 
 		err = m.generateClusterJoinCommand()
 		if err != nil {

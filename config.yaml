@@ -18,26 +18,26 @@
 #  nerdctl: "2.2.1"
 #  k8s: "1.35.0"
 #
-## 组件部署配置（默认不启用）
-#addons:
-#  kube_ovn:
-#    enabled: false
-#    version: "1.15.0"
-#  multus_cni:
-#    enabled: false
-#    version: "snapshot-thick"
-#  local_path_storage:
-#    enabled: false
-#    version: "0.0.34"
+# 组件部署配置（默认不启用）
+addons:
+  kube_ovn:
+    enabled: true
+    version: "1.15.0"
+  multus_cni:
+    enabled: true
+    version: "snapshot-thick"
+  local_path_storage:
+    enabled: true
+    version: "0.0.34"
 
 # 仅执行预检查，不执行安装动作
-dry_run: true
+dry_run: false
 
 # 私有仓库配置
 registry:
-  endpoint: "ykl.io"
-  port: 40443
-  ip: 192.168.31.175
+  endpoint: "jusuan.io"
+  port: 80
+  ip: 192.168.1.7
 
 # 节点列表（按顺序进行安装）
 nodes:
@@ -51,7 +51,7 @@ nodes:
     ssh_port: 22
     is_master: false
     install_tools: true
-  - ip: "192.168.1.11"
+  - ip: "192.168.1.3"
     password: "root"
     ssh_port: 22
     is_master: false

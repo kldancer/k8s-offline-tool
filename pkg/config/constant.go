@@ -20,7 +20,20 @@ const (
 
 var SupportedInstallModes = []string{InstallModeFull, InstallModeAddonsOnly}
 
-var RequiredImages = []string{
+var RequiredKubeOvnImages = []string{
+	"docker.io/kubeovn/kube-ovn:v1.15.0",
+	"docker.io/kubeovn/vpc-nat-gateway:v1.15.0",
+}
+
+var RequiredMultusCNImages = []string{
+	"ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick",
+}
+
+var RequiredLocalPathProvisionerImages = []string{
+	"rancher/local-path-provisioner:v0.0.34",
+}
+
+var RequiredK8sImages = []string{
 	"registry.aliyuncs.com/google_containers/kube-apiserver:v1.35.0",
 	"registry.aliyuncs.com/google_containers/kube-controller-manager:v1.35.0",
 	"registry.aliyuncs.com/google_containers/kube-scheduler:v1.35.0",
@@ -28,8 +41,4 @@ var RequiredImages = []string{
 	"registry.aliyuncs.com/google_containers/coredns:v1.13.1",
 	"registry.aliyuncs.com/google_containers/pause:3.10.1",
 	"registry.aliyuncs.com/google_containers/etcd:3.6.6-0",
-	"docker.io/kubeovn/kube-ovn:v1.15.0",
-	"docker.io/kubeovn/vpc-nat-gateway:v1.15.0",
-	"ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick",
-	"rancher/local-path-provisioner:v0.0.34",
 }
