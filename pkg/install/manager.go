@@ -296,9 +296,6 @@ func (m *Manager) Run(dryRun bool) error {
 			runner.Step{
 				Name: "安装常用工具",
 				Check: func() (bool, error) {
-					if !m.nodeCfg.InstallTools {
-						return true, nil
-					}
 					return m.installer.CheckCommonTools()
 				},
 				Action: m.installer.InstallCommonTools,
@@ -344,9 +341,25 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.ConfiguraRegistryContainerd,
 			},
 		)
+
+		// full模式、addons模式下，需要同步镜像, 且同步镜像的操作只执行一次
+		if m.globalCfg.InstallMode != config.InstallModeInstallOnly && !hasMirrorSync {
+			steps = append(steps,
+				runner.Step{
+					Name: "同步镜像到私有仓库",
+					Check: func() (bool, error) {
+						if !m.nodeCfg.IsMaster {
+							return true, nil
+						}
+						return false, nil
+					},
+					Action: m.syncImagesToRegistry,
+				},
+			)
+		}
 	}
 
-	if m.globalCfg.InstallMode != config.InstallModeAddonsOnly && m.context.HasGPU {
+	if m.context.HasGPU {
 		steps = append(steps,
 			runner.Step{
 				Name:   "配置 GPU 运行时",
@@ -356,30 +369,15 @@ func (m *Manager) Run(dryRun bool) error {
 		)
 	}
 
-	// full模式、addons模式下，需要同步镜像, 且同步镜像的操作只执行一次
-	if m.globalCfg.Registry.Endpoint != "" && m.globalCfg.InstallMode != config.InstallModeInstallOnly && !hasMirrorSync {
-		steps = append(steps,
-			runner.Step{
-				Name: "同步镜像到私有仓库",
-				Check: func() (bool, error) {
-					if !m.nodeCfg.IsMaster {
-						return true, nil
-					}
-					return false, nil
-				},
-				Action: m.syncImagesToRegistry,
-			},
-		)
-	}
-
-	// 非addons模式下，需要安装Kubernetes 组件
 	if m.globalCfg.InstallMode != config.InstallModeAddonsOnly {
+		// 非 addons模式下，需要安装Kubernetes 组件
 		steps = append(steps,
 			runner.Step{
 				Name:   "安装 Kubernetes 组件",
 				Check:  m.installer.CheckK8sComponents,
 				Action: m.installer.InstallK8sComponents,
 			})
+
 	}
 
 	// full模式下，需要初始化或加入集群

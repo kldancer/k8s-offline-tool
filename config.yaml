@@ -8,8 +8,8 @@
 #
 # 安装模式：
 # - full: 从零安装并初始化集群
-# - addons-only: 在已有集群中仅部署组件
-# - install-only： 仅安装软件，不执行kubeadm init & join
+# - addons-only: 在已有集群中仅部署插件
+# - install-only： 仅安装软件，不执行kubeadm init & join 及之后操作
 install_mode: "full"
 #
 ## 软件版本定义

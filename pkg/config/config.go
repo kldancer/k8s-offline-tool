@@ -23,11 +23,10 @@ type Config struct {
 }
 
 type NodeConfig struct {
-	IP           string `yaml:"ip"`
-	Password     string `yaml:"password"`
-	SSHPort      int    `yaml:"ssh_port"` // 可选：覆盖全局 Port
-	IsMaster     bool   `yaml:"is_master"`
-	InstallTools bool   `yaml:"install_tools"`
+	IP       string `yaml:"ip"`
+	Password string `yaml:"password"`
+	SSHPort  int    `yaml:"ssh_port"` // 可选：覆盖全局 Port
+	IsMaster bool   `yaml:"is_master"`
 }
 
 type RegistryConfig struct {

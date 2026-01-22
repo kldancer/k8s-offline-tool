@@ -61,34 +61,32 @@ nodes:
     password: "root"
     ssh_port: 22
     is_master: true
-    install_tools: true
   - ip: "192.168.1.10"
     password: "root"
     ssh_port: 22
     is_master: false
-    install_tools: true
 
 # Worker 节点加入集群的命令 (在 is_master: false 的节点上执行)
 join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-ca-cert-hash <hash>"
 ```
-极简配置示例见 [config-minimalism.yaml](example/config-minimalism.yaml)
+配置示例见下文
 
 ### 字段解释与默认值
 
 #### 顶层字段
 
-| 字段 | 必填 | 默认值    | 说明                                                         |
-| -- | --- |--------|------------------------------------------------------------|
-| `ssh_port` | 否 | `22`   | SSH 端口默认值，可被节点级配置覆盖。                                       |
-| `user` | 否 | `root` | SSH 用户名。                                                   |
-| `command_timeout_seconds` | 否 | `600`  | 远程命令执行超时（秒）。                                               |
-| `install_mode` | 否 | `full` | 安装模式：`full` 为从零安装集群，`addons-only` 为仅部署组件, `install-only` 为仅安装软件，不执行kubeadm init & join |
-| `dry_run` | 否 | `false` | 仅执行预检查，不执行安装动作。                                            |
-| `versions` | 否 | 见下表    | 离线包版本配置。                                                   |
-| `addons` | 否 | 见下表    | 组件启用与版本配置。                                                 |
-| `registry` | 否 | 空      | 私有镜像仓库配置（Harbor），启用后会同步镜像并重写部署文件。                          |
-| `nodes` | 是 | 见下表    | 节点列表，至少包含一个 `is_master: true` 的节点。                         |
-| `join_command` | 否 | 空      | worker 加入集群时使用的命令。若未指定，会在 master 初始化后自动生成。                 |
+| 字段 | 必填 | 默认值    | 说明                                                                                         |
+| -- | --- |--------|--------------------------------------------------------------------------------------------|
+| `ssh_port` | 否 | `22`   | SSH 端口默认值，可被节点级配置覆盖。                                                                       |
+| `user` | 否 | `root` | SSH 用户名。                                                                                   |
+| `command_timeout_seconds` | 否 | `600`  | 远程命令执行超时（秒）。                                                                               |
+| `install_mode` | 否 | `full` | 安装模式：`full` 为从零安装集群，`addons-only` 为仅部署k8s插件, `install-only` 为仅安装软件，不执行kubeadm init & join及及插件安装 |
+| `dry_run` | 否 | `false` | 仅执行预检查，不执行安装动作。                                                                            |
+| `versions` | 否 | 见下表    | 离线包版本配置。                                                                                   |
+| `addons` | 否 | 见下表    | 组件启用与版本配置。                                                                                 |
+| `registry` | 否 | 空      | 私有镜像仓库配置（Harbor），启用后会同步镜像并重写部署文件。                                                          |
+| `nodes` | 是 | 见下表    | 节点列表，至少包含一个 `is_master: true` 的节点。                                                         |
+| `join_command` | 否 | 空      | worker 加入集群时使用的命令。若未指定，会在 master 初始化后自动生成。                                                 |
 
 #### `versions`（支持版本）
 
@@ -129,13 +127,7 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 | `password` | 是  | -    | 节点登录密码。             |
 | `ssh_port` | 否  | 22   | SSH 端口，默认为 `22`。    |
 | `is_master` | 否  | true | 是否为 master 节点。      |
-| `install_tools` | 否  | true | 是否安装基础工具 |
 
-## 使用方式
-
-```bash
-./k8s-offline-tool -config config.yaml
-```
 
 ## 操作系统以及内核版本支持清单
 后续持续添加适配其它操作系统及内核
@@ -150,5 +142,151 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 - 监控类：htop
 - 数据格式化：jq、bash-completion
 - 下载类：dnf-plugins-core（apt-transport-https）、wget 、curl
-- 网络类：net-tools、iproute-tc（iproute2）、NetworkManager-tui、bridge-utils、bind-utils（bind9-utils）、tcpdump 
+- 网络类：net-tools、iproute-tc（iproute2）、NetworkManager-tui、bridge-utils、bind-utils（bind9-utils）、tcpdump
 - 代码工具：git、make、vim
+- 算力运行时: nvidia-container-toolkit
+
+
+## 使用方式
+
+```bash
+./k8s-offline-tool -config config.yaml
+```
+
+## 安装步骤解析
+
+
+![Installation-steps.png](doc/Installation-steps.png)
+
+
+
+
+## 使用场景
+
+### 场景一：离线环境完整安装 Kubernetes 集群
+按顺序部署节点，安装基础工具、容器运行时、配置私有镜像仓库、同步所需镜像、Kubernetes 安装、插件安装，并在第一个 master 节点初始化集群，其他节点加入集群
+```bash
+root@f1:~# cat config.yaml 
+registry:
+  endpoint: "jusuan.io"
+  port: 8080
+  ip: 192.168.1.7
+  username: "admin"
+  password: "Harbor12345"
+nodes:
+  - ip: "192.168.1.8"
+    password: "root"
+  - ip: "192.168.1.10"
+    password: "root"
+    is_master: false
+  - ip: "192.168.1.3"
+    password: "root"
+    is_master: false
+addons:
+  kube_ovn:
+    enabled: true
+  multus_cni:
+    enabled: true
+  local_path_storage:
+    enabled: true
+    
+# 仅执行预检查，正式安装前可先执行预检查模式看看
+# dry_run: true 
+root@f1:~# ./k8s-offline-tool -config config.yaml
+```
+
+### 场景二：在已有集群中部署常用组件
+插件可以选择性安装
+```bash
+root@f1:~# cat config.yaml 
+install_mode: "addons-only"
+registry:
+  endpoint: "jusuan.io"
+  port: 8080
+  ip: 192.168.1.7
+  username: "admin"
+  password: "Harbor12345"
+nodes:
+  - ip: "192.168.1.8"
+    password: "root"
+addons:
+  kube_ovn:
+    enabled: true
+  multus_cni:
+    enabled: false
+  local_path_storage:
+    enabled: true
+root@f1:~# ./k8s-offline-tool -config config.yaml
+```
+
+### 场景三：仅安装基础工具和 k8s 组件，不执行 kubeadm init/join 及插件安装
+且没有配置私有镜像仓库
+```bash
+root@f1:~# cat config.yaml 
+install_mode: "install-only"
+nodes:
+  - ip: "192.168.1.8"
+    password: "root"
+root@f1:~# ./k8s-offline-tool -config config.yaml
+```
+
+## 注意事项
+私有镜像仓库镜像同步步骤的执行是在本程序运行的本地环境中进行的，确保本地环境可以访问配置的私有仓库。附上配置示例：
+### docker
+```bash
+cat <<EOF > daemon.json
+{
+  "registry-mirrors": ["https://hdi5v8p1.mirror.aliyuncs.com"],
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "insecure-registries" : [ "jusuan.io:8080"]
+}
+EOF
+mv daemon.json /etc/docker/
+
+systemctl enable docker.service
+sudo systemctl daemon-reload
+systemctl restart docker.service
+```
+
+### containerd 2.2版本+
+```bash
+containerd config default > /etc/containerd/config.toml
+sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+sudo sed -i "s|config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'|config_path = '/etc/containerd/certs.d'|g" /etc/containerd/config.toml
+
+sudo mkdir -p /etc/containerd/certs.d/jusuan.io:8080
+sudo tee /etc/containerd/certs.d/jusuan.io:8080/hosts.toml >/dev/null <<'EOF'
+server = "http://jusuan.io:8080"
+
+[host."http://jusuan.io:8080"]
+  capabilities = ["pull", "resolve", "push"]
+EOF
+
+systemctl enable containerd.service
+sudo systemctl daemon-reload
+systemctl restart containerd.service
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
