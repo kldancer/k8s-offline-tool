@@ -86,7 +86,7 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 | `dry_run` | 否 | `false` | 仅执行预检查，不执行安装动作。 |
 | `versions` | 否 | 见下表    | 离线包版本配置。 |
 | `addons` | 否 | 见下表    | 组件启用与版本配置。 |
-| `registry` | 否 | 空      | 私有镜像仓库配置，启用后会同步镜像并重写部署文件。 |
+| `registry` | 否 | 空      | 私有镜像仓库配置（Harbor），启用后会同步镜像并重写部署文件。 |
 | `nodes` | 是 | 见下表    | 节点列表，至少包含一个 `is_master: true` 的节点。 |
 | `join_command` | 否 | 空      | worker 加入集群时使用的命令。若未指定，会在 master 初始化后自动生成。 |
 
@@ -115,9 +115,11 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 
 | 字段 | 必填 | 说明                            |
 | --- |----|-------------------------------|
-| `endpoint` | 是  | 私有镜像仓库域名（http）。               |
-| `port` | 是  | 私有镜像仓库端口。                     |
-| `ip` | 是  | 私有镜像仓库的 IP，用于写入 `/etc/hosts`。 |
+| `endpoint` | 是  | Harbor 域名（http）。               |
+| `port` | 是  | Harbor 端口。                     |
+| `ip` | 是  | Harbor 的 IP，用于写入 `/etc/hosts`。 |
+| `username` | 否  | Harbor 用户名，用于创建项目和查询镜像。 |
+| `password` | 否  | Harbor 密码。 |
 
 
 #### `nodes`

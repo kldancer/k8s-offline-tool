@@ -34,6 +34,8 @@ type RegistryConfig struct {
 	Endpoint string `yaml:"endpoint"`
 	IP       string `yaml:"ip"`
 	Port     int    `yaml:"port"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
 }
 
 type VersionConfig struct {
