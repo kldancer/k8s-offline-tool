@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -443,13 +444,16 @@ func (m *Manager) registryHost() (string, bool) {
 }
 
 func (m *Manager) imageClient() (string, error) {
-	if _, err := m.context.RunCmd("nerdctl --version"); err == nil {
+	if _, err := m.runLocalCmd("docker --version"); err == nil {
+		return "docker", nil
+	}
+	if _, err := m.runLocalCmd("nerdctl --version"); err == nil {
 		return "nerdctl", nil
 	}
-	if _, err := m.context.RunCmd("ctr version"); err == nil {
+	if _, err := m.runLocalCmd("ctr version"); err == nil {
 		return "ctr", nil
 	}
-	return "", fmt.Errorf("nerdctl or ctr is required to sync images")
+	return "", fmt.Errorf("docker, nerdctl, or ctr is required to sync images")
 }
 
 func (m *Manager) syncImagesToRegistry() error {
@@ -504,25 +508,35 @@ func (m *Manager) syncImagesToRegistry() error {
 			continue
 		}
 		switch client {
-		case "nerdctl":
-			if _, err := m.context.RunCmd(fmt.Sprintf("nerdctl pull %s", image)); err != nil {
+		case "docker":
+			if _, err := m.runLocalCmd(fmt.Sprintf("docker pull %s", image)); err != nil {
 				return err
 			}
-			if _, err := m.context.RunCmd(fmt.Sprintf("nerdctl tag %s %s", image, target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("docker tag %s %s", image, target)); err != nil {
+				return err
+			}
+			if _, err := m.runLocalCmd(fmt.Sprintf("docker push %s", target)); err != nil {
+				return err
+			}
+		case "nerdctl":
+			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl pull %s", image)); err != nil {
+				return err
+			}
+			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl tag %s %s", image, target)); err != nil {
 				return err
 			}
 			// 不用添加 --insecure-registry，因为已经配置了http
-			if _, err := m.context.RunCmd(fmt.Sprintf("nerdctl  push %s", target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl push %s", target)); err != nil {
 				return err
 			}
 		case "ctr":
-			if _, err := m.context.RunCmd(fmt.Sprintf("ctr images pull %s", image)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images pull %s", image)); err != nil {
 				return err
 			}
-			if _, err := m.context.RunCmd(fmt.Sprintf("ctr images tag %s %s", image, target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images tag %s %s", image, target)); err != nil {
 				return err
 			}
-			if _, err := m.context.RunCmd(fmt.Sprintf("ctr images push --plain-http %s", target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images push --plain-http %s", target)); err != nil {
 				return err
 			}
 		}
@@ -547,7 +561,7 @@ func (m *Manager) harborRequest(method, requestURL string, body []byte) (int, st
 		bodyArgs = fmt.Sprintf("-H 'Content-Type: application/json' -d %q", string(body))
 	}
 	cmd := fmt.Sprintf("curl -s -w 'HTTPSTATUS:%%{http_code}' -X %s %s %s %q", method, authArgs, bodyArgs, requestURL)
-	out, err := m.context.RunCmd(cmd)
+	out, err := m.runLocalCmd(cmd)
 	if err != nil {
 		return 0, "", err
 	}
@@ -759,6 +773,15 @@ func replaceImageRegistry(image, registry string) string {
 		return registry + "/" + image
 	}
 	return registry + "/" + parts[1]
+}
+
+func (m *Manager) runLocalCmd(cmd string) (string, error) {
+	output, err := exec.Command("bash", "-lc", cmd).CombinedOutput()
+	outText := strings.TrimSpace(string(output))
+	if err != nil {
+		return outText, fmt.Errorf("local command failed: %w: %s", err, outText)
+	}
+	return outText, nil
 }
 
 func (m *Manager) checkClusterStatus() (bool, error) {
