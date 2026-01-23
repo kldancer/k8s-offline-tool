@@ -246,6 +246,16 @@ join_command: "xxxx"
 root@f1:~# ./k8s-offline-tool -config config.yaml
 ```
 
+
+## 📦 运行示例
+
+<p align="center">
+  <img src="doc/demo.gif" width="900">
+
+</p>
+
+
+
 ## 注意事项
 私有镜像仓库镜像同步步骤的执行是在本程序运行的本地环境中进行的，确保本地环境可以访问配置的私有仓库。附上配置示例：
 ### docker
