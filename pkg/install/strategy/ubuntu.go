@@ -55,7 +55,7 @@ func (u *UbuntuInstaller) CheckCommonTools() (bool, error) {
 }
 func (u *UbuntuInstaller) InstallCommonTools() error {
 	debPath := fmt.Sprintf("%s/common-tools/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
-	_, err := u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s", debPath))
+	_, err := u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s || sudo apt -f install", debPath))
 	return err
 }
 

@@ -8,7 +8,7 @@
 - 在 master 节点初始化集群，并自动生成 worker 的 join command，若配置中没有master节点，需手动配置worker 节点的 join command。
 - 支持私有镜像仓库：同步所需镜像到私有 registry，并在部署时重写镜像地址。前提：程序执行的本地环境以配置能访问该私有仓库。
 - 支持预检查模式，检查各安装步骤是否需要执行，不执行安装动作。
-- 支持安装模式选择，从零安装并初始化集群还是在已有集群中仅部署k8s组件，组件部署：kube-ovn、multus-cni、local-path-storage（可选）。。
+- 支持安装模式选择，从零安装并初始化集群还是在已有集群中仅部署k8s组件，组件部署：kube-ovn、multus-cni、local-path-storage（可选）。
 
 ## 配置说明
 
@@ -139,13 +139,17 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 
 
 ## 基础工具列表
-- 监控类：htop
-- 数据格式化：jq、bash-completion
-- 下载类：dnf-plugins-core（apt-transport-https）、wget 、curl
-- 网络类：net-tools、iproute-tc（iproute2）、NetworkManager-tui、bridge-utils、bind-utils（bind9-utils）、tcpdump
-- 代码工具：git、make、vim
-- 算力运行时: nvidia-container-toolkit
+程序执行时，会在系统中安装如下附加的基础工具：
 
+* fedora 41 
+  * 监控类：htop
+  * 下载类：dnf-plugins-core
+  * 网络类：iproute-tc、NetworkManager-tui
+  * 算力容器运行时工具: nvidia-container-toolkit
+
+* ubuntu 24.04
+  * 下载类：apt-transport-https
+  * 算力容器运行时工具: nvidia-container-toolkit
 
 ## 使用方式
 
@@ -246,6 +250,16 @@ join_command: "xxxx"
 root@f1:~# ./k8s-offline-tool -config config.yaml
 ```
 
+
+## 📦 运行示例
+
+<p align="center">
+  <img src="doc/demo.gif" width="900">
+
+</p>
+
+
+
 ## 注意事项
 私有镜像仓库镜像同步步骤的执行是在本程序运行的本地环境中进行的，确保本地环境可以访问配置的私有仓库。附上配置示例：
 ### docker
@@ -286,10 +300,10 @@ systemctl restart containerd.service
 
 
 ## TODO
-* 持续添加适配其它操作系统及内核
-* 持续添加适配其它国产加速卡的驱动、固件、容器运行时工具的检测与安装
-* 持续添加适配其它k8s插件
-* 适需求添加适配k8s版本的升级
+* 持续添加适配其它操作系统、架构及内核。
+* 持续添加适配其它国产加速卡的驱动、固件、容器运行时工具的检测与安装。
+* 持续添加适配其它k8s插件。
+* 适需求添加适配k8s版本的升级。
 
 
 

@@ -146,7 +146,7 @@ func (m *Manager) distributeResources() error {
 		if !isFedora && strings.Contains(p, "/rpm") {
 			return true
 		}
-		if !m.context.HasGPU && strings.Contains(p, "nvidia-container-toolkit") {
+		if !m.context.HasGPU && strings.Contains(p, "nvidia-container") {
 			return true
 		}
 		if !m.shouldIncludeAddonPath(p, isDir) {

@@ -62,7 +62,7 @@ func (f *FedoraInstaller) CheckCommonTools() (bool, error) {
 }
 func (f *FedoraInstaller) InstallCommonTools() error {
 	rpmPath := fmt.Sprintf("%s/common-tools/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
-	_, err := f.Ctx.RunCmd(fmt.Sprintf("rpm -Uvh %s --nodeps --force", rpmPath))
+	_, err := f.Ctx.RunCmd(fmt.Sprintf("sudo dnf install -y %s --disablerepo=\"*\" --nogpgcheck", rpmPath))
 	return err
 }
 
