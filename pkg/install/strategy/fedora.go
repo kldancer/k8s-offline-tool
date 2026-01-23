@@ -99,6 +99,10 @@ func (f *FedoraInstaller) ConfigureAndStartContainerd() error {
 	return ConfigureAndStartContainerd(f.Ctx)
 }
 
+func (f *FedoraInstaller) CheckConfiguraRegistryContainerd() (bool, error) {
+	return CheckConfiguraRegistryContainerd(f.Ctx)
+}
+
 func (f *FedoraInstaller) ConfiguraRegistryContainerd() error {
 	return ConfiguraRegistryContainerd(f.Ctx)
 }

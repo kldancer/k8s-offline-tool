@@ -34,6 +34,7 @@ type NodeInstaller interface {
 	CheckContainerdRunning() (bool, error)
 	ConfigureAndStartContainerd() error
 
+	CheckConfiguraRegistryContainerd() (bool, error)
 	ConfiguraRegistryContainerd() error
 
 	CheckCrictl() (bool, error)

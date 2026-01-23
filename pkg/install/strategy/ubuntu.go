@@ -91,6 +91,10 @@ func (u *UbuntuInstaller) ConfigureAndStartContainerd() error {
 	return ConfigureAndStartContainerd(u.Ctx)
 }
 
+func (u *UbuntuInstaller) CheckConfiguraRegistryContainerd() (bool, error) {
+	return CheckConfiguraRegistryContainerd(u.Ctx)
+}
+
 func (u *UbuntuInstaller) ConfiguraRegistryContainerd() error {
 	return ConfiguraRegistryContainerd(u.Ctx)
 }

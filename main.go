@@ -33,7 +33,6 @@ func main() {
 	fmt.Printf("开始%s %d 个节点...\n\n", runMode, len(cfg.Nodes))
 
 	results := make([]nodeResult, 0, len(cfg.Nodes))
-	var runErr error
 
 	// 2. 顺序执行, 先执行master节点安装
 	for i := range cfg.Nodes {
@@ -42,8 +41,9 @@ func main() {
 		}
 		result := runNode(cfg, i, os.Stdout, cfg.DryRun)
 		results = append(results, result)
-		if result.Err != nil && runErr == nil {
-			runErr = result.Err
+		if result.Err != nil {
+			log.Fatal(result.Err)
+			return
 		}
 	}
 
@@ -51,16 +51,14 @@ func main() {
 		workerResults := runWorkersSequentially(cfg, os.Stdout, cfg.DryRun)
 		results = append(results, workerResults...)
 		for _, result := range workerResults {
-			if result.Err != nil && runErr == nil {
-				runErr = result.Err
+			if result.Err != nil {
+				log.Fatal(result.Err)
+				return
 			}
 		}
 	}
 
 	printSummary(results, cfg.DryRun)
-	if runErr != nil {
-		log.Fatal(runErr)
-	}
 }
 
 type nodeResult struct {

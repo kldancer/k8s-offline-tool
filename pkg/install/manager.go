@@ -337,7 +337,7 @@ func (m *Manager) Run(dryRun bool) error {
 		steps = append(steps,
 			runner.Step{
 				Name:   "配置私有镜像仓库,并重启 Containerd",
-				Check:  m.installer.CheckContainerdRunning,
+				Check:  m.installer.CheckConfiguraRegistryContainerd,
 				Action: m.installer.ConfiguraRegistryContainerd,
 			},
 		)
@@ -348,9 +348,6 @@ func (m *Manager) Run(dryRun bool) error {
 				runner.Step{
 					Name: "同步镜像到私有仓库",
 					Check: func() (bool, error) {
-						if !m.nodeCfg.IsMaster {
-							return true, nil
-						}
 						return false, nil
 					},
 					Action: m.syncImagesToRegistry,
@@ -507,7 +504,7 @@ func (m *Manager) syncImagesToRegistry() error {
 		}
 		switch client {
 		case "docker":
-			if _, err := m.runLocalCmd(fmt.Sprintf("docker pull %s", image)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("docker pull --platform=linux/%s %s", m.context.Arch, image)); err != nil {
 				return err
 			}
 			if _, err := m.runLocalCmd(fmt.Sprintf("docker tag %s %s", image, target)); err != nil {
@@ -517,7 +514,7 @@ func (m *Manager) syncImagesToRegistry() error {
 				return err
 			}
 		case "nerdctl":
-			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl pull %s", image)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl pull --platform=linux/%s %s", m.context.Arch, image)); err != nil {
 				return err
 			}
 			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl tag %s %s", image, target)); err != nil {
@@ -528,7 +525,7 @@ func (m *Manager) syncImagesToRegistry() error {
 				return err
 			}
 		case "ctr":
-			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images pull %s", image)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images pull --platform=linux/%s %s", m.context.Arch, image)); err != nil {
 				return err
 			}
 			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images tag %s %s", image, target)); err != nil {
@@ -668,9 +665,9 @@ func (m *Manager) deployKubeOvn() error {
 			return err
 		}
 	}
-	cmd := fmt.Sprintf("bash %s ", installScript)
-	_, err := m.context.RunCmd(cmd)
-	return err
+	cmd := fmt.Sprintf("bash %s > /dev/null 2>&1", installScript)
+	m.context.RunCmd(cmd)
+	return nil
 }
 
 func (m *Manager) deployMultusCNI() error {
@@ -698,7 +695,7 @@ func (m *Manager) deployLocalPathStorage() error {
 	manifestPath := path.Join(m.context.RemoteTmpDir, "local-path-provisioner", versionDir, "local-path-storage.yaml")
 	if registryHost, ok := m.registryHost(); ok {
 		image := registryHost + "/rancher/local-path-provisioner:v0.0.34"
-		cmd := fmt.Sprintf("sed -i 's|rancher/local-path-provisioner:v0.0.34|%s|g' %s", image, manifestPath)
+		cmd := fmt.Sprintf("sed -i 's|docker.io/rancher/local-path-provisioner:v0.0.34|%s|g' %s", image, manifestPath)
 		if _, err := m.context.RunCmd(cmd); err != nil {
 			return err
 		}
@@ -839,7 +836,7 @@ func (m *Manager) generateClusterJoinCommand() error {
 	if err != nil {
 		return fmt.Errorf("kubeadm token create --print-join-command failed, %s", out)
 	}
-	fmt.Fprintf(m.output, "\n[%s] Token Create Result: %s ", m.nodeCfg.IP, out)
+	//fmt.Fprintf(m.output, "\n[%s] Token Create Result: %s ", m.nodeCfg.IP, out)
 	m.globalCfg.JoinCommand = out
 	return nil
 }

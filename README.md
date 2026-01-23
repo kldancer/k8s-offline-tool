@@ -230,6 +230,22 @@ nodes:
 root@f1:~# ./k8s-offline-tool -config config.yaml
 ```
 
+### 场景四： 将目标work节点加入已存在集群
+如有私有镜像仓库，请配置 `registry` 参数
+```bash
+root@f1:~# cat config.yaml 
+install_mode: "full"
+nodes:
+  - ip: "192.168.1.10"
+    password: "root"
+    is_master: false
+  - ip: "192.168.1.3"
+    password: "root"
+    is_master: false
+join_command: "xxxx"
+root@f1:~# ./k8s-offline-tool -config config.yaml
+```
+
 ## 注意事项
 私有镜像仓库镜像同步步骤的执行是在本程序运行的本地环境中进行的，确保本地环境可以访问配置的私有仓库。附上配置示例：
 ### docker
@@ -269,6 +285,11 @@ systemctl restart containerd.service
 
 
 
+## TODO
+* 持续添加适配其它操作系统及内核
+* 持续添加适配其它国产加速卡的驱动、固件、容器运行时工具的检测与安装
+* 持续添加适配其它k8s插件
+* 适需求添加适配k8s版本的升级
 
 
 

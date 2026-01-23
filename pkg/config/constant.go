@@ -31,7 +31,7 @@ var RequiredMultusCNImages = []string{
 }
 
 var RequiredLocalPathProvisionerImages = []string{
-	"rancher/local-path-provisioner:v0.0.34",
+	"docker.io/rancher/local-path-provisioner:v0.0.34",
 }
 
 var RequiredK8sImages = []string{

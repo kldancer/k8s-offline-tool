@@ -98,6 +98,16 @@ func ConfigureAndStartContainerd(ctx *Context) error {
 	return err
 }
 
+func CheckConfiguraRegistryContainerd(ctx *Context) (bool, error) {
+	regDomain := ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", ctx.Cfg.Registry.Port)
+	path := fmt.Sprintf("/etc/containerd/certs.d/%s/hosts.toml", regDomain)
+	out, err := ctx.RunCmd(fmt.Sprintf("test -e %s && echo EXISTS || echo MISSING", path))
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) == "EXISTS", nil
+}
+
 func ConfiguraRegistryContainerd(ctx *Context) error {
 	// 1.1 启用 certs.d 目录配置
 	ctx.RunCmd("sed -i \"s|config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'|config_path = '/etc/containerd/certs.d'|g\" /etc/containerd/config.toml")
