@@ -472,7 +472,16 @@ func (m *Manager) syncImagesToRegistry() error {
 		images = append(images, config.RequiredLocalPathProvisionerImages...)
 	}
 
+	type imageSyncItem struct {
+		source   string
+		target   string
+		project  string
+		repoName string
+		tag      string
+	}
+
 	projectCache := make(map[string]bool)
+	syncList := make([]imageSyncItem, 0, len(images))
 	for _, image := range images {
 		target := replaceImageRegistry(image, registryHost)
 		repo, tag := splitImage(target)
@@ -481,59 +490,105 @@ func (m *Manager) syncImagesToRegistry() error {
 		if err != nil {
 			return err
 		}
-		// 检查项目是否存在
-		if !projectCache[project] {
-			exists, err := m.harborProjectExists(registryHost, project)
+		exists, ok := projectCache[project]
+		if !ok {
+			exists, err = m.harborProjectExists(registryHost, project)
 			if err != nil {
 				return err
 			}
-			if !exists {
-				if err := m.createHarborProject(registryHost, project); err != nil {
-					return err
-				}
+			projectCache[project] = exists
+		}
+		if exists {
+			tagExists, err := m.harborTagExists(registryHost, project, repoName, tag)
+			if err != nil {
+				return err
 			}
-			projectCache[project] = true
+			if tagExists {
+				continue
+			}
 		}
-		// 检查tag是否存在
-		tagExists, err := m.harborTagExists(registryHost, project, repoName, tag)
-		if err != nil {
-			return err
+		syncList = append(syncList, imageSyncItem{
+			source:   image,
+			target:   target,
+			project:  project,
+			repoName: repoName,
+			tag:      tag,
+		})
+	}
+
+	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
+	if len(syncList) == 0 {
+		fmt.Fprintf(m.output, "%s  └─ 镜像已全部同步，无需重复同步\n", prefix)
+		hasMirrorSync = true
+		return nil
+	}
+
+	fmt.Fprintf(m.output, "%s  └─ 需要同步镜像（%d）：\n", prefix, len(syncList))
+	for _, item := range syncList {
+		fmt.Fprintf(m.output, "%s    - %s\n", prefix, item.source)
+	}
+
+	current := 0
+	total := len(syncList)
+	const barWidth = 20
+
+	for _, item := range syncList {
+		if !projectCache[item.project] {
+			if err := m.createHarborProject(registryHost, item.project); err != nil {
+				return err
+			}
+			projectCache[item.project] = true
 		}
-		if tagExists {
-			continue
+
+		displayIndex := current + 1
+		percent := float64(displayIndex) / float64(total) * 100
+		filled := int(float64(barWidth) * float64(displayIndex) / float64(total))
+		if filled > barWidth {
+			filled = barWidth
 		}
+		bar := strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled)
+		if filled > 0 && filled < barWidth {
+			bar = strings.Repeat("=", filled-1) + ">" + strings.Repeat(" ", barWidth-filled)
+		}
+
+		fmt.Fprintf(m.output, "\r%s  └─ Syncing: [%s] %3.0f%% (%d/%d) %s", prefix, bar, percent, displayIndex, total, item.source)
+
 		switch client {
 		case "docker":
-			if _, err := m.runLocalCmd(fmt.Sprintf("docker pull --platform=linux/%s %s", m.context.Arch, image)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("docker pull --platform=linux/%s %s", m.context.Arch, item.source)); err != nil {
 				return err
 			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("docker tag %s %s", image, target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("docker tag %s %s", item.source, item.target)); err != nil {
 				return err
 			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("docker push %s", target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("docker push %s", item.target)); err != nil {
 				return err
 			}
 		case "nerdctl":
-			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl pull --platform=linux/%s %s", m.context.Arch, image)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl pull --platform=linux/%s %s", m.context.Arch, item.source)); err != nil {
 				return err
 			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl tag %s %s", image, target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl tag %s %s", item.source, item.target)); err != nil {
 				return err
 			}
 			// 不用添加 --insecure-registry，因为已经配置了http
-			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl push %s", target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl push %s", item.target)); err != nil {
 				return err
 			}
 		case "ctr":
-			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images pull --platform=linux/%s %s", m.context.Arch, image)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images pull --platform=linux/%s %s", m.context.Arch, item.source)); err != nil {
 				return err
 			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images tag %s %s", image, target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images tag %s %s", item.source, item.target)); err != nil {
 				return err
 			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images push --plain-http %s", target)); err != nil {
+			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images push --plain-http %s", item.target)); err != nil {
 				return err
 			}
+		}
+		current++
+		if current == total {
+			fmt.Fprint(m.output, "\n")
 		}
 	}
 	hasMirrorSync = true
