@@ -66,6 +66,29 @@ func (f *FedoraInstaller) InstallCommonTools() error {
 	return err
 }
 
+// --- Load Balancer ---
+func (f *FedoraInstaller) CheckHAProxy() (bool, error) {
+	out, err := f.Ctx.RunCmd("haproxy -v")
+	return err == nil && strings.Contains(strings.ToLower(out), "haproxy"), nil
+}
+
+func (f *FedoraInstaller) InstallHAProxy() error {
+	rpmPath := fmt.Sprintf("%s/haproxy/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
+	_, err := f.Ctx.RunCmd(fmt.Sprintf("sudo dnf install -y %s --disablerepo=\"*\" --nogpgcheck", rpmPath))
+	return err
+}
+
+func (f *FedoraInstaller) CheckKeepalived() (bool, error) {
+	out, err := f.Ctx.RunCmd("keepalived -v")
+	return err == nil && strings.Contains(strings.ToLower(out), "keepalived"), nil
+}
+
+func (f *FedoraInstaller) InstallKeepalived() error {
+	rpmPath := fmt.Sprintf("%s/keepalived/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
+	_, err := f.Ctx.RunCmd(fmt.Sprintf("sudo dnf install -y %s --disablerepo=\"*\" --nogpgcheck", rpmPath))
+	return err
+}
+
 // --- Containerd Granular ---
 func (f *FedoraInstaller) CheckContainerdBinaries() (bool, error) {
 	return CheckContainerdBinaries(f.Ctx)

@@ -35,10 +35,7 @@ func main() {
 	results := make([]nodeResult, 0, len(cfg.Nodes))
 
 	// 2. 顺序执行, 先执行master节点安装
-	for i := range cfg.Nodes {
-		if !cfg.Nodes[i].IsMaster {
-			continue
-		}
+	for _, i := range masterNodeOrder(cfg) {
 		result := runNode(cfg, i, os.Stdout, cfg.DryRun)
 		results = append(results, result)
 		if result.Err != nil {
@@ -103,6 +100,32 @@ func managerRun(cfg *config.Config, i int, writer io.Writer, dryRun bool) error 
 		return fmt.Errorf("[%s] Failed: %v", cfg.Nodes[i].IP, err)
 	}
 	return nil
+}
+
+func masterNodeOrder(cfg *config.Config) []int {
+	masters := make([]int, 0, len(cfg.Nodes))
+	primaryIndex := -1
+	for i := range cfg.Nodes {
+		if !cfg.Nodes[i].IsMaster {
+			continue
+		}
+		masters = append(masters, i)
+		if cfg.Nodes[i].IsPrimaryMaster {
+			primaryIndex = i
+		}
+	}
+	if !cfg.HA.Enabled || primaryIndex == -1 {
+		return masters
+	}
+	ordered := make([]int, 0, len(masters))
+	ordered = append(ordered, primaryIndex)
+	for _, idx := range masters {
+		if idx == primaryIndex {
+			continue
+		}
+		ordered = append(ordered, idx)
+	}
+	return ordered
 }
 
 func loadConfig(path string) *config.Config {
@@ -196,13 +219,21 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 		if strings.TrimSpace(node.Password) == "" {
 			return fmt.Errorf("Error: Node[%d] password is required.", i)
 		}
+		if node.IsPrimaryMaster && !node.IsMaster {
+			return fmt.Errorf("Error: Node[%d] primary master must also be a master node.", i)
+		}
 	}
 
 	hasMaster := false
+	primaryMasterCount := 0
+	masterIndices := make([]int, 0)
 	for i := range cfg.Nodes {
 		if cfg.Nodes[i].IsMaster {
 			hasMaster = true
-			break
+			masterIndices = append(masterIndices, i)
+			if cfg.Nodes[i].IsPrimaryMaster {
+				primaryMasterCount++
+			}
 		}
 	}
 
@@ -220,6 +251,23 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 
 	if !hasMaster && cfg.JoinCommand == "" {
 		return fmt.Errorf("Error: join command is required.")
+	}
+
+	if cfg.HA.Enabled {
+		if len(masterIndices) != 3 {
+			return fmt.Errorf("Error: HA mode requires exactly 3 master nodes, got %d.", len(masterIndices))
+		}
+		if primaryMasterCount != 1 {
+			return fmt.Errorf("Error: HA mode requires exactly 1 primary master node.")
+		}
+		if strings.TrimSpace(cfg.HA.VirtualIP) == "" {
+			return fmt.Errorf("Error: HA mode requires virtual_ip.")
+		}
+		for _, idx := range masterIndices {
+			if strings.TrimSpace(cfg.Nodes[idx].Interface) == "" {
+				return fmt.Errorf("Error: master node[%d] interface is required for HA mode.", idx)
+			}
+		}
 	}
 
 	return nil

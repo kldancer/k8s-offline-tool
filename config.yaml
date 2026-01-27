@@ -42,12 +42,19 @@ registry:
   username: "admin"
   password: "Harbor12345"
 
+# 三 Master 高可用配置
+#ha:
+#  enabled: true
+#  virtual_ip: "192.168.1.100/24"
+
 # 节点列表（按顺序进行安装）
 nodes:
   - ip: "192.168.1.8"
     password: "root"
     ssh_port: 22
     is_master: true
+    is_primary_master: true
+    interface: "eth0"
     install_tools: true
   - ip: "192.168.1.10"
     password: "root"

@@ -59,6 +59,29 @@ func (u *UbuntuInstaller) InstallCommonTools() error {
 	return err
 }
 
+// --- Load Balancer ---
+func (u *UbuntuInstaller) CheckHAProxy() (bool, error) {
+	out, err := u.Ctx.RunCmd("haproxy -v")
+	return err == nil && strings.Contains(strings.ToLower(out), "haproxy"), nil
+}
+
+func (u *UbuntuInstaller) InstallHAProxy() error {
+	debPath := fmt.Sprintf("%s/haproxy/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
+	_, err := u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s || sudo apt -f install", debPath))
+	return err
+}
+
+func (u *UbuntuInstaller) CheckKeepalived() (bool, error) {
+	out, err := u.Ctx.RunCmd("keepalived -v")
+	return err == nil && strings.Contains(strings.ToLower(out), "keepalived"), nil
+}
+
+func (u *UbuntuInstaller) InstallKeepalived() error {
+	debPath := fmt.Sprintf("%s/keepalived/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
+	_, err := u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s || sudo apt -f install", debPath))
+	return err
+}
+
 // --- Containerd Granular ---
 func (u *UbuntuInstaller) CheckContainerdBinaries() (bool, error) {
 	return CheckContainerdBinaries(u.Ctx)
