@@ -298,6 +298,48 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.ConfigureSysctl,
 			},
 			runner.Step{
+				Name: "安装常用工具",
+				Check: func() (bool, error) {
+					return m.installer.CheckCommonTools()
+				},
+				Action: m.installer.InstallCommonTools,
+			},
+			runner.Step{
+				Name:   "安装 Containerd 二进制文件",
+				Check:  m.installer.CheckContainerdBinaries,
+				Action: m.installer.InstallContainerdBinaries,
+			},
+			runner.Step{
+				Name:   "安装 Runc",
+				Check:  m.installer.CheckRunc,
+				Action: m.installer.InstallRunc,
+			},
+			runner.Step{
+				Name:   "配置 Containerd 服务",
+				Check:  m.installer.CheckContainerdService,
+				Action: m.installer.ConfigureContainerdService,
+			},
+			runner.Step{
+				Name:   "配置cgroup 并启动 Containerd",
+				Check:  m.installer.CheckContainerdRunning,
+				Action: m.installer.ConfigureAndStartContainerd,
+			},
+			runner.Step{
+				Name:   "配置 Crictl 默认endpoint",
+				Check:  m.installer.CheckCrictl,
+				Action: m.installer.ConfigureCrictl,
+			},
+			runner.Step{
+				Name:   "安装 Nerdctl",
+				Check:  m.installer.CheckNerdctl,
+				Action: m.installer.InstallNerdctl,
+			},
+		)
+	}
+
+	if m.nodeCfg.IsMaster {
+		steps = append(steps,
+			runner.Step{
 				Name: "配置 LB Sysctl 内核参数",
 				Check: func() (bool, error) {
 					if !m.shouldConfigureLoadBalancer() {
@@ -311,13 +353,6 @@ func (m *Manager) Run(dryRun bool) error {
 					}
 					return m.configureLoadBalancerSysctl()
 				},
-			},
-			runner.Step{
-				Name: "安装常用工具",
-				Check: func() (bool, error) {
-					return m.installer.CheckCommonTools()
-				},
-				Action: m.installer.InstallCommonTools,
 			},
 			runner.Step{
 				Name: "安装 HAProxy",
@@ -379,36 +414,6 @@ func (m *Manager) Run(dryRun bool) error {
 					return m.configureKeepalived()
 				},
 			},
-			runner.Step{
-				Name:   "安装 Containerd 二进制文件",
-				Check:  m.installer.CheckContainerdBinaries,
-				Action: m.installer.InstallContainerdBinaries,
-			},
-			runner.Step{
-				Name:   "安装 Runc",
-				Check:  m.installer.CheckRunc,
-				Action: m.installer.InstallRunc,
-			},
-			runner.Step{
-				Name:   "配置 Containerd 服务",
-				Check:  m.installer.CheckContainerdService,
-				Action: m.installer.ConfigureContainerdService,
-			},
-			runner.Step{
-				Name:   "配置cgroup 并启动 Containerd",
-				Check:  m.installer.CheckContainerdRunning,
-				Action: m.installer.ConfigureAndStartContainerd,
-			},
-			runner.Step{
-				Name:   "配置 Crictl 默认endpoint",
-				Check:  m.installer.CheckCrictl,
-				Action: m.installer.ConfigureCrictl,
-			},
-			runner.Step{
-				Name:   "安装 Nerdctl",
-				Check:  m.installer.CheckNerdctl,
-				Action: m.installer.InstallNerdctl,
-			},
 		)
 	}
 
@@ -467,7 +472,7 @@ func (m *Manager) Run(dryRun bool) error {
 		)
 	}
 
-	if m.nodeCfg.IsMaster {
+	if m.nodeCfg.IsMaster && m.nodeCfg.IsPrimaryMaster {
 		steps = append(steps, m.addonSteps()...)
 	}
 
@@ -650,6 +655,10 @@ vrrp_instance VI_1 {
 }
 `, routerID, state, m.nodeCfg.Interface, priority, m.nodeCfg.IP, strings.Join(peerLines, "\n"), m.globalCfg.HA.VirtualIP)
 
+	if _, err := m.context.RunCmd("sudo mkdir -p /etc/keepalived/"); err != nil {
+		return err
+	}
+
 	checkScript := `cat <<'EOF' | sudo tee /etc/keepalived/check_haproxy.sh
 #!/usr/bin/env bash
 set -euo pipefail
@@ -676,6 +685,14 @@ func (m *Manager) addonSteps() []runner.Step {
 				if !m.nodeCfg.IsMaster || !m.globalCfg.Addons.KubeOvn.Enabled {
 					return true, nil
 				}
+
+				out, err := m.context.RunCmd("test -e /etc/cni/net.d/01-kube-ovn.conflist && echo EXISTS || echo MISSING")
+				if err != nil {
+					return true, err
+				}
+				if strings.TrimSpace(out) == "EXISTS" {
+					return true, nil
+				}
 				return false, nil
 			},
 			Action: m.deployKubeOvn,
@@ -684,6 +701,14 @@ func (m *Manager) addonSteps() []runner.Step {
 			Name: "部署 Multus CNI",
 			Check: func() (bool, error) {
 				if !m.nodeCfg.IsMaster || !m.globalCfg.Addons.MultusCNI.Enabled {
+					return true, nil
+				}
+
+				out, err := m.context.RunCmd("test -e /etc/cni/net.d/00-multus.conf && echo EXISTS || echo MISSING")
+				if err != nil {
+					return true, err
+				}
+				if strings.TrimSpace(out) == "EXISTS" {
 					return true, nil
 				}
 				return false, nil

@@ -55,6 +55,12 @@ registry:
   port: 40443
   ip: 192.168.31.175
 
+# 三 Master 高可用配置
+ha:
+  enabled: true
+  virtual_ip: "192.168.1.100/24"
+
+
 # 节点列表（按顺序进行安装）
 nodes:
   - ip: "192.168.1.8"
@@ -64,10 +70,15 @@ nodes:
   - ip: "192.168.1.10"
     password: "root"
     ssh_port: 22
-    is_master: false
+  - ip: "192.168.1.3"
+    password: "root"
+    ssh_port: 22
+
 
 # Worker 节点加入集群的命令 (在 is_master: false 的节点上执行)
 join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-ca-cert-hash <hash>"
+# 子Master 节点加入集群的命令 (在 is_master: true,is_primary_master: false 的节点上执行)
+master_join_command: ""
 ```
 配置示例见下文
 
@@ -87,6 +98,8 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 | `registry` | 否 | 空      | 私有镜像仓库配置（Harbor），启用后会同步镜像并重写部署文件。                                                          |
 | `nodes` | 是 | 见下表    | 节点列表，至少包含一个 `is_master: true` 的节点。                                                         |
 | `join_command` | 否 | 空      | worker 加入集群时使用的命令。若未指定，会在 master 初始化后自动生成。                                                 |
+| `master_join_command` | 否 | 空      | 子Master 节点加入集群时使用的命令。若未指定，会在 master 节点初始化后自动生成。 |
+| `ha` | 否 | 空      | 三 Master 高可用配置。                                                                           |
 
 #### `versions`（支持版本）
 
@@ -121,12 +134,23 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 
 
 #### `nodes`
-| 字段 | 必填 | 默认值  | 说明|
-| --- |----|------|---|
-| `ip` | 是  | -    | 节点 IP |
-| `password` | 是  | -    | 节点登录密码。             |
-| `ssh_port` | 否  | 22   | SSH 端口，默认为 `22`。    |
-| `is_master` | 否  | true | 是否为 master 节点。      |
+| 字段 | 必填 | 默认值  | 说明               |
+| --- |----|------|------------------|
+| `ip` | 是  | -    | 节点 IP            |
+| `password` | 是  | -    | 节点登录密码。          |
+| `ssh_port` | 否  | 22   | SSH 端口，默认为 `22`。 |
+| `is_master` | 否  | false | 是否为 master 节点。   |
+| `is_primary_master` | 否  | false | 是否为主 master 节点。  |
+| `interface` | 否  | -    | 节点管理网卡名称，ha模式下必填 |
+
+
+#### `ha`
+ha 模式开启时，要求配置3个master节点，其中一个为主 master 节点。
+
+| 字段 | 必填 | 默认值 | 说明 |
+| --- |----|-----|----------------|
+| `enabled` | 是  | true | 是否启用高可用        |
+| `virtual_ip` | 是  | -   | 三主高可用虚拟 IP     |
 
 
 ## 操作系统以及内核版本支持清单
@@ -154,7 +178,12 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 ## 使用方式
 
 ```bash
-./k8s-offline-tool -config config.yaml
+# 编译
+go build -o k8s-offline-tool main.go
+```
+
+```bash
+./k8s-offline-tool -config xxx.yaml
 ```
 
 ## 安装步骤解析
@@ -180,12 +209,11 @@ registry:
 nodes:
   - ip: "192.168.1.8"
     password: "root"
+    is_master: true
   - ip: "192.168.1.10"
     password: "root"
-    is_master: false
   - ip: "192.168.1.3"
     password: "root"
-    is_master: false
 addons:
   kube_ovn:
     enabled: true
@@ -242,10 +270,8 @@ install_mode: "full"
 nodes:
   - ip: "192.168.1.10"
     password: "root"
-    is_master: false
   - ip: "192.168.1.3"
     password: "root"
-    is_master: false
 join_command: "xxxx"
 root@f1:~# ./k8s-offline-tool -config config.yaml
 ```

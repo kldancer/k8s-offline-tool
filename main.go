@@ -16,7 +16,7 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "config.yaml", "配置文件路径。e.g. config.yaml")
+	cfgPath := flag.String("config", "example/config-ha.yaml", "配置文件路径。e.g. config.yaml")
 	flag.Parse()
 
 	// 1. 加载配置
@@ -117,6 +117,12 @@ func masterNodeOrder(cfg *config.Config) []int {
 	if !cfg.HA.Enabled || primaryIndex == -1 {
 		return masters
 	}
+
+	// addons 模式只需要主master节点执行安装
+	if cfg.InstallMode == config.InstallModeAddonsOnly {
+		return []int{primaryIndex}
+	}
+
 	ordered := make([]int, 0, len(masters))
 	ordered = append(ordered, primaryIndex)
 	for _, idx := range masters {
@@ -219,8 +225,8 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 		if strings.TrimSpace(node.Password) == "" {
 			return fmt.Errorf("Error: Node[%d] password is required.", i)
 		}
-		if node.IsPrimaryMaster && !node.IsMaster {
-			return fmt.Errorf("Error: Node[%d] primary master must also be a master node.", i)
+		if !node.IsMaster {
+			cfg.Nodes[i].IsPrimaryMaster = false
 		}
 	}
 
