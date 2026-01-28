@@ -5,6 +5,7 @@ type Config struct {
 	Registry RegistryConfig `yaml:"registry"`
 	Versions VersionConfig  `yaml:"versions"`
 	Addons   AddonsConfig   `yaml:"addons"`
+	HA       HAConfig       `yaml:"ha"`
 
 	// 默认 SSH 配置 (如果 Node 中未指定则使用此默认值)
 	SSHPort int    `yaml:"ssh_port"`
@@ -15,18 +16,21 @@ type Config struct {
 	InstallMode string `yaml:"install_mode"`
 
 	// 节点列表
-	Nodes       []NodeConfig `yaml:"nodes"`
-	JoinCommand string       `yaml:"join_command"` // 供 Worker 节点使用的全局 Join 命令
+	Nodes             []NodeConfig `yaml:"nodes"`
+	JoinCommand       string       `yaml:"join_command"`        // 供 Worker 节点使用的全局 Join 命令
+	MasterJoinCommand string       `yaml:"master_join_command"` // 供 Master 节点使用的 Join 命令
 
 	// 仅执行预检查，不执行安装动作
 	DryRun bool `yaml:"dry_run"`
 }
 
 type NodeConfig struct {
-	IP       string `yaml:"ip"`
-	Password string `yaml:"password"`
-	SSHPort  int    `yaml:"ssh_port"` // 可选：覆盖全局 Port
-	IsMaster bool   `yaml:"is_master"`
+	IP              string `yaml:"ip"`
+	Password        string `yaml:"password"`
+	SSHPort         int    `yaml:"ssh_port"` // 可选：覆盖全局 Port
+	IsMaster        bool   `yaml:"is_master"`
+	IsPrimaryMaster bool   `yaml:"is_primary_master"`
+	Interface       string `yaml:"interface"`
 }
 
 type RegistryConfig struct {
@@ -53,4 +57,9 @@ type AddonsConfig struct {
 type AddonComponentConfig struct {
 	Enabled bool   `yaml:"enabled"`
 	Version string `yaml:"version"`
+}
+
+type HAConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	VirtualIP string `yaml:"virtual_ip"`
 }

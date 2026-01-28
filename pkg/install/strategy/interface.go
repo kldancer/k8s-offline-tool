@@ -21,6 +21,12 @@ type NodeInstaller interface {
 	CheckCommonTools() (bool, error)
 	InstallCommonTools() error
 
+	// Load balancer
+	CheckHAProxy() (bool, error)
+	InstallHAProxy() error
+	CheckKeepalived() (bool, error)
+	InstallKeepalived() error
+
 	// Containerd Granular Steps
 	CheckContainerdBinaries() (bool, error)
 	InstallContainerdBinaries() error

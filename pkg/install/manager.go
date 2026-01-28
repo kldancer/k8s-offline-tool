@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -147,6 +148,9 @@ func (m *Manager) distributeResources() error {
 			return true
 		}
 		if !m.context.HasGPU && strings.Contains(p, "nvidia-container") {
+			return true
+		}
+		if m.isLoadBalancerPath(p) && !m.shouldIncludeLoadBalancerPath() {
 			return true
 		}
 		if !m.shouldIncludeAddonPath(p, isDir) {
@@ -294,11 +298,86 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.ConfigureSysctl,
 			},
 			runner.Step{
+				Name: "配置 LB Sysctl 内核参数",
+				Check: func() (bool, error) {
+					if !m.shouldConfigureLoadBalancer() {
+						return true, nil
+					}
+					return m.checkLoadBalancerSysctl()
+				},
+				Action: func() error {
+					if !m.shouldConfigureLoadBalancer() {
+						return nil
+					}
+					return m.configureLoadBalancerSysctl()
+				},
+			},
+			runner.Step{
 				Name: "安装常用工具",
 				Check: func() (bool, error) {
 					return m.installer.CheckCommonTools()
 				},
 				Action: m.installer.InstallCommonTools,
+			},
+			runner.Step{
+				Name: "安装 HAProxy",
+				Check: func() (bool, error) {
+					if !m.shouldConfigureLoadBalancer() {
+						return true, nil
+					}
+					return m.installer.CheckHAProxy()
+				},
+				Action: func() error {
+					if !m.shouldConfigureLoadBalancer() {
+						return nil
+					}
+					return m.installer.InstallHAProxy()
+				},
+			},
+			runner.Step{
+				Name: "配置 HAProxy",
+				Check: func() (bool, error) {
+					if !m.shouldConfigureLoadBalancer() {
+						return true, nil
+					}
+					return m.checkHAProxyConfig()
+				},
+				Action: func() error {
+					if !m.shouldConfigureLoadBalancer() {
+						return nil
+					}
+					return m.configureHAProxy()
+				},
+			},
+			runner.Step{
+				Name: "安装 Keepalived",
+				Check: func() (bool, error) {
+					if !m.shouldConfigureLoadBalancer() {
+						return true, nil
+					}
+					return m.installer.CheckKeepalived()
+				},
+				Action: func() error {
+					if !m.shouldConfigureLoadBalancer() {
+						return nil
+					}
+					return m.installer.InstallKeepalived()
+				},
+			},
+			runner.Step{
+				Name: "配置 Keepalived",
+				Check: func() (bool, error) {
+					if !m.shouldConfigureLoadBalancer() {
+						return true, nil
+					}
+					return m.checkKeepalivedConfig()
+				},
+				Action: func() error {
+					if !m.shouldConfigureLoadBalancer() {
+						return nil
+					}
+					return m.configureKeepalived()
+				},
 			},
 			runner.Step{
 				Name:   "安装 Containerd 二进制文件",
@@ -394,6 +473,199 @@ func (m *Manager) Run(dryRun bool) error {
 
 	// 调用 Runner，传入前缀
 	return runner.RunPipeline(steps, prefix, m.output, dryRun)
+}
+
+func (m *Manager) shouldConfigureLoadBalancer() bool {
+	return m.globalCfg.HA.Enabled && m.nodeCfg.IsMaster
+}
+
+func (m *Manager) isPrimaryMaster() bool {
+	return m.nodeCfg.IsMaster && m.nodeCfg.IsPrimaryMaster
+}
+
+func (m *Manager) masterNodeIPs() []string {
+	ips := make([]string, 0, len(m.globalCfg.Nodes))
+	for _, node := range m.globalCfg.Nodes {
+		if node.IsMaster {
+			ips = append(ips, node.IP)
+		}
+	}
+	return ips
+}
+
+func (m *Manager) virtualIPHost() string {
+	vip := strings.TrimSpace(m.globalCfg.HA.VirtualIP)
+	if vip == "" {
+		return ""
+	}
+	if strings.Contains(vip, "/") {
+		parts := strings.SplitN(vip, "/", 2)
+		return parts[0]
+	}
+	return vip
+}
+
+func (m *Manager) checkLoadBalancerSysctl() (bool, error) {
+	out, err := m.context.RunCmd("cat /etc/sysctl.d/99-k8s-lb.conf")
+	return err == nil && strings.Contains(out, "net.ipv4.ip_nonlocal_bind"), nil
+}
+
+func (m *Manager) configureLoadBalancerSysctl() error {
+	cmd := `cat <<'EOF' | sudo tee /etc/sysctl.d/99-k8s-lb.conf
+net.ipv4.ip_nonlocal_bind = 1
+EOF`
+	if _, err := m.context.RunCmd(cmd); err != nil {
+		return err
+	}
+	_, err := m.context.RunCmd("sysctl --system")
+	return err
+}
+
+func (m *Manager) checkHAProxyConfig() (bool, error) {
+	out, err := m.context.RunCmd("cat /etc/haproxy/haproxy.cfg")
+	if err != nil {
+		return false, nil
+	}
+	return strings.Contains(out, "frontend k8s_api") && strings.Contains(out, "backend k8s_api_backend"), nil
+}
+
+func (m *Manager) configureHAProxy() error {
+	masterIPs := m.masterNodeIPs()
+	if len(masterIPs) == 0 {
+		return fmt.Errorf("no master nodes found for haproxy config")
+	}
+	backendLines := make([]string, 0, len(masterIPs))
+	for idx, ip := range masterIPs {
+		backendLines = append(backendLines, fmt.Sprintf("  server cp%d %s:6443 check", idx+1, ip))
+	}
+	config := fmt.Sprintf(`global
+  daemon
+  maxconn 20000
+
+defaults
+  mode tcp
+  option tcplog
+  timeout connect 5s
+  timeout client  1m
+  timeout server  1m
+
+# 对外入口：VIP:16443（避免与 apiserver 6443 冲突）
+frontend k8s_api
+  bind *:16443
+  mode tcp
+  option tcplog
+  default_backend k8s_api_backend
+
+# 后端：三台 apiserver 实际监听的 6443
+backend k8s_api_backend
+  balance roundrobin
+  option tcp-check
+  default-server inter 2s fall 3 rise 2
+%s
+`, strings.Join(backendLines, "\n"))
+
+	cmd := fmt.Sprintf("cp /etc/haproxy/haproxy.cfg /etc/haproxy/haproxy.cfg.bak.$(date +%%F) || true\ncat > /etc/haproxy/haproxy.cfg <<'EOF'\n%s\nEOF", config)
+	if _, err := m.context.RunCmd(cmd); err != nil {
+		return err
+	}
+	if _, err := m.context.RunCmd("haproxy -c -f /etc/haproxy/haproxy.cfg"); err != nil {
+		return err
+	}
+	_, err := m.context.RunCmd("systemctl enable --now haproxy")
+	return err
+}
+
+func (m *Manager) checkKeepalivedConfig() (bool, error) {
+	out, err := m.context.RunCmd("cat /etc/keepalived/keepalived.conf")
+	if err != nil {
+		return false, nil
+	}
+	vip := m.globalCfg.HA.VirtualIP
+	return strings.Contains(out, "vrrp_instance") && strings.Contains(out, vip), nil
+}
+
+func (m *Manager) configureKeepalived() error {
+	peerIPs := make([]string, 0, len(m.globalCfg.Nodes))
+	routerID := ""
+	priority := 90
+	state := "BACKUP"
+	for idx, node := range m.globalCfg.Nodes {
+		if !node.IsMaster {
+			continue
+		}
+		if node.IP == m.nodeCfg.IP {
+			routerID = fmt.Sprintf("K8S_CP_%d", idx+1)
+			if node.IsPrimaryMaster {
+				priority = 100
+				state = "MASTER"
+			} else {
+				priority = 90
+			}
+			continue
+		}
+		peerIPs = append(peerIPs, node.IP)
+	}
+	if routerID == "" {
+		return fmt.Errorf("failed to determine router_id for keepalived")
+	}
+	peerLines := make([]string, 0, len(peerIPs))
+	for _, ip := range peerIPs {
+		peerLines = append(peerLines, fmt.Sprintf("    %s", ip))
+	}
+	config := fmt.Sprintf(`global_defs {
+  router_id %s
+}
+
+vrrp_script chk_haproxy {
+  script "/etc/keepalived/check_haproxy.sh"
+  interval 2
+  fall 2
+  rise 2
+}
+
+vrrp_instance VI_1 {
+  state %s
+  interface %s
+  virtual_router_id 51
+  priority %d
+  advert_int 1
+
+  authentication {
+    auth_type PASS
+    auth_pass 123456
+  }
+
+  unicast_src_ip %s
+  unicast_peer {
+%s
+  }
+
+  virtual_ipaddress {
+    %s
+  }
+
+  track_script {
+    chk_haproxy
+  }
+}
+`, routerID, state, m.nodeCfg.Interface, priority, m.nodeCfg.IP, strings.Join(peerLines, "\n"), m.globalCfg.HA.VirtualIP)
+
+	checkScript := `cat <<'EOF' | sudo tee /etc/keepalived/check_haproxy.sh
+#!/usr/bin/env bash
+set -euo pipefail
+systemctl is-active --quiet haproxy
+EOF
+sudo chmod a+x /etc/keepalived/check_haproxy.sh`
+
+	if _, err := m.context.RunCmd(checkScript); err != nil {
+		return err
+	}
+	cmd := fmt.Sprintf("cat > /etc/keepalived/keepalived.conf <<'EOF'\n%s\nEOF", config)
+	if _, err := m.context.RunCmd(cmd); err != nil {
+		return err
+	}
+	_, err := m.context.RunCmd("systemctl enable --now keepalived")
+	return err
 }
 
 func (m *Manager) addonSteps() []runner.Step {
@@ -773,6 +1045,17 @@ func (m *Manager) shouldIncludeAddonPath(p string, isDir bool) bool {
 	return true
 }
 
+func (m *Manager) isLoadBalancerPath(p string) bool {
+	return p == "haproxy" ||
+		strings.HasPrefix(p, "haproxy/") ||
+		p == "keepalived" ||
+		strings.HasPrefix(p, "keepalived/")
+}
+
+func (m *Manager) shouldIncludeLoadBalancerPath() bool {
+	return m.shouldConfigureLoadBalancer()
+}
+
 func (m *Manager) isAddonPath(p string) bool {
 	return p == "cni" ||
 		strings.HasPrefix(p, "cni/kube-ovn") ||
@@ -841,7 +1124,10 @@ func (m *Manager) checkClusterStatus() (bool, error) {
 		out, err = m.client.RunCommand("ls /etc/kubernetes/kubelet.conf")
 	}
 	if m.nodeCfg.IsMaster && err == nil && out != "" {
-		err = m.generateClusterJoinCommand()
+		if m.globalCfg.HA.Enabled && !m.isPrimaryMaster() {
+			return true, nil
+		}
+		err = m.generateClusterJoinCommands()
 		if err != nil {
 			return false, err
 		}
@@ -852,14 +1138,27 @@ func (m *Manager) checkClusterStatus() (bool, error) {
 
 func (m *Manager) runKubeadm() error {
 	if m.nodeCfg.IsMaster {
+		if m.globalCfg.HA.Enabled && !m.isPrimaryMaster() {
+			if strings.TrimSpace(m.globalCfg.MasterJoinCommand) == "" {
+				return fmt.Errorf("master join command is required for HA mode")
+			}
+			_, err := m.client.RunCommand(m.globalCfg.MasterJoinCommand)
+			return err
+		}
 		repo := "registry.aliyuncs.com/google_containers"
 		if m.globalCfg.Registry.Endpoint != "" {
 			repo = fmt.Sprintf("%s:%d/google_containers", m.globalCfg.Registry.Endpoint, m.globalCfg.Registry.Port)
 		}
 
+		controlPlaneEndpoint := ""
+		if m.globalCfg.HA.Enabled {
+			controlPlaneEndpoint = fmt.Sprintf(` \
+--control-plane-endpoint "%s:16443" \
+--upload-certs`, m.virtualIPHost())
+		}
 		cmd := fmt.Sprintf(`kubeadm init --v 0 \
 --kubernetes-version=v%s \
---image-repository=%s`, m.globalCfg.Versions.K8s, repo)
+--image-repository=%s%s`, m.globalCfg.Versions.K8s, repo, controlPlaneEndpoint)
 
 		_, err := m.client.RunCommand(cmd)
 		if err != nil {
@@ -869,7 +1168,7 @@ func (m *Manager) runKubeadm() error {
 
 		m.client.RunCommand("mkdir -p $HOME/.kube && cp -f /etc/kubernetes/admin.conf $HOME/.kube/config && chown $(id -u):$(id -g) $HOME/.kube/config")
 
-		err = m.generateClusterJoinCommand()
+		err = m.generateClusterJoinCommands()
 		if err != nil {
 			return err
 		}
@@ -886,12 +1185,36 @@ func (m *Manager) runKubeadm() error {
 	return nil
 }
 
-func (m *Manager) generateClusterJoinCommand() error {
+func (m *Manager) generateClusterJoinCommands() error {
 	out, err := m.client.RunCommand("kubeadm token create --print-join-command")
 	if err != nil {
 		return fmt.Errorf("kubeadm token create --print-join-command failed, %s", out)
 	}
 	//fmt.Fprintf(m.output, "\n[%s] Token Create Result: %s ", m.nodeCfg.IP, out)
-	m.globalCfg.JoinCommand = out
+	m.globalCfg.JoinCommand = strings.TrimSpace(out)
+	if !m.globalCfg.HA.Enabled {
+		return nil
+	}
+	if !m.isPrimaryMaster() {
+		return nil
+	}
+	certOut, err := m.client.RunCommand("kubeadm init phase upload-certs --upload-certs")
+	if err != nil {
+		return fmt.Errorf("kubeadm init phase upload-certs failed, %s", certOut)
+	}
+	certKey := extractCertificateKey(certOut)
+	if certKey == "" {
+		return fmt.Errorf("failed to parse certificate key from output: %s", certOut)
+	}
+	m.globalCfg.MasterJoinCommand = fmt.Sprintf("%s --control-plane --certificate-key %s", strings.TrimSpace(out), certKey)
 	return nil
+}
+
+func extractCertificateKey(output string) string {
+	re := regexp.MustCompile(`[a-f0-9]{32,64}`)
+	matches := re.FindAllString(strings.ToLower(output), -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[len(matches)-1]
 }
