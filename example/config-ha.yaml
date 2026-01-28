@@ -52,6 +52,9 @@ nodes:
   - ip: "10.10.10.61"
     password: "root"
     ssh_port: 22
+  - ip: "10.10.10.70"
+    password: "root"
+    ssh_port: 22
 
 
 
