@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -42,10 +43,64 @@ EOF`)
 }
 
 // --- Containerd Granular ---
-func CheckContainerdPackage(ctx *Context) (bool, error) {
-	out, err := ctx.RunCmd("containerd --version")
-	// 检查版本是否包含配置的版本号
-	return err == nil && strings.Contains(out, ctx.Cfg.Versions.Containerd), nil
+func CheckDockerCEPackage(ctx *Context) (bool, error) {
+	dockerOut, err := ctx.RunCmd("docker --version")
+	if err != nil {
+		return false, nil
+	}
+	containerdOut, err := ctx.RunCmd("containerd --version")
+	if err != nil {
+		return false, nil
+	}
+	runcOut, err := ctx.RunCmd("runc --version")
+	if err != nil {
+		return false, nil
+	}
+	expectedDockerVersion, _ := dockerCEVersion(ctx)
+	dockerOK := strings.Contains(dockerOut, "Docker")
+	if expectedDockerVersion != "" {
+		dockerOK = strings.Contains(dockerOut, expectedDockerVersion)
+	}
+	return dockerOK &&
+		strings.Contains(containerdOut, ctx.Cfg.Versions.Containerd) &&
+		strings.Contains(runcOut, ctx.Cfg.Versions.Runc), nil
+}
+
+func dockerCEVersion(ctx *Context) (string, error) {
+	aptCmd := fmt.Sprintf("ls %s/docker-ce/%s/apt/docker-ce_*.deb 2>/dev/null | head -n1", ctx.RemoteTmpDir, ctx.Arch)
+	out, _ := ctx.RunCmd(aptCmd)
+	version := strings.TrimSpace(out)
+	if version == "" {
+		rpmCmd := fmt.Sprintf("ls %s/docker-ce/%s/rpm/docker-ce-*.rpm 2>/dev/null | head -n1", ctx.RemoteTmpDir, ctx.Arch)
+		out, _ := ctx.RunCmd(rpmCmd)
+		version = strings.TrimSpace(out)
+	}
+	if version == "" {
+		return "", nil
+	}
+	base := path.Base(version)
+	if strings.HasPrefix(base, "docker-ce_") {
+		versionPart := strings.TrimSuffix(strings.TrimPrefix(base, "docker-ce_"), ".deb")
+		if idx := strings.Index(versionPart, "_"); idx >= 0 {
+			versionPart = versionPart[:idx]
+		}
+		versionPart = strings.ReplaceAll(versionPart, "%3a", ":")
+		if idx := strings.Index(versionPart, ":"); idx >= 0 {
+			versionPart = versionPart[idx+1:]
+		}
+		if idx := strings.Index(versionPart, "-"); idx >= 0 {
+			versionPart = versionPart[:idx]
+		}
+		return versionPart, nil
+	}
+	if strings.HasPrefix(base, "docker-ce-") {
+		versionPart := strings.TrimSuffix(strings.TrimPrefix(base, "docker-ce-"), ".rpm")
+		if idx := strings.Index(versionPart, "-"); idx >= 0 {
+			versionPart = versionPart[:idx]
+		}
+		return versionPart, nil
+	}
+	return "", nil
 }
 
 func CheckContainerdRunning(ctx *Context) (bool, error) {

@@ -83,11 +83,11 @@ func (u *UbuntuInstaller) InstallKeepalived() error {
 }
 
 // --- Containerd Granular ---
-func (u *UbuntuInstaller) CheckContainerdPackage() (bool, error) {
-	return CheckContainerdPackage(u.Ctx)
+func (u *UbuntuInstaller) CheckDockerCEPackage() (bool, error) {
+	return CheckDockerCEPackage(u.Ctx)
 }
-func (u *UbuntuInstaller) InstallContainerdPackage() error {
-	debPath := fmt.Sprintf("%s/docker-ce/%s/apt/containerd.io*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
+func (u *UbuntuInstaller) InstallDockerCEPackage() error {
+	debPath := fmt.Sprintf("%s/docker-ce/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
 	_, err := u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s || sudo apt -f install", debPath))
 	return err
 }

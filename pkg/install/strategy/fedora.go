@@ -90,11 +90,11 @@ func (f *FedoraInstaller) InstallKeepalived() error {
 }
 
 // --- Containerd Granular ---
-func (f *FedoraInstaller) CheckContainerdPackage() (bool, error) {
-	return CheckContainerdPackage(f.Ctx)
+func (f *FedoraInstaller) CheckDockerCEPackage() (bool, error) {
+	return CheckDockerCEPackage(f.Ctx)
 }
-func (f *FedoraInstaller) InstallContainerdPackage() error {
-	rpmPath := fmt.Sprintf("%s/docker-ce/%s/rpm/containerd.io-*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
+func (f *FedoraInstaller) InstallDockerCEPackage() error {
+	rpmPath := fmt.Sprintf("%s/docker-ce/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
 	_, err := f.Ctx.RunCmd(fmt.Sprintf("sudo dnf install -y %s --disablerepo=\"*\" --nogpgcheck", rpmPath))
 	return err
 }

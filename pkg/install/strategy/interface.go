@@ -28,8 +28,8 @@ type NodeInstaller interface {
 	InstallKeepalived() error
 
 	// Containerd Granular Steps
-	CheckContainerdPackage() (bool, error)
-	InstallContainerdPackage() error
+	CheckDockerCEPackage() (bool, error)
+	InstallDockerCEPackage() error
 
 	CheckContainerdRunning() (bool, error)
 	ConfigureAndStartContainerd() error

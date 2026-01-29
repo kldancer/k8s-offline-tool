@@ -305,9 +305,9 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.InstallCommonTools,
 			},
 			runner.Step{
-				Name:   "安装 Containerd 软件包",
-				Check:  m.installer.CheckContainerdPackage,
-				Action: m.installer.InstallContainerdPackage,
+				Name:   "安装 Docker CE 软件包",
+				Check:  m.installer.CheckDockerCEPackage,
+				Action: m.installer.InstallDockerCEPackage,
 			},
 			runner.Step{
 				Name:   "配置cgroup 并启动 Containerd",
