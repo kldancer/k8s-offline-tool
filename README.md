@@ -105,7 +105,7 @@ master_join_command: ""
 
 | 字段           | 默认值      | 说明            |
 |--------------|----------|---------------|
-| `docker`         | `29.2.0` | docker-ce 版本  |
+| `dockerce`         | `29.2.0` | docker-ce 版本  |
 | `containerd` | `2.2.1`  | containerd 版本。 |
 | `runc`       | `1.3.4`  | runc 版本。      |
 | `nerdctl`    | `2.2.1`  | nerdctl 版本。   |
