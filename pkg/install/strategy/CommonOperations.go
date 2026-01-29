@@ -42,41 +42,10 @@ EOF`)
 }
 
 // --- Containerd Granular ---
-func CheckContainerdBinaries(ctx *Context) (bool, error) {
+func CheckContainerdPackage(ctx *Context) (bool, error) {
 	out, err := ctx.RunCmd("containerd --version")
 	// 检查版本是否包含配置的版本号
 	return err == nil && strings.Contains(out, ctx.Cfg.Versions.Containerd), nil
-}
-func InstallContainerdBinaries(ctx *Context, vFolder string) error {
-	tarCmd := fmt.Sprintf("tar -C /usr/local -xzf %s/containerd/%s/%s/containerd-%s-linux-%s.tar.gz",
-		ctx.RemoteTmpDir, ctx.Arch, vFolder, ctx.Cfg.Versions.Containerd, ctx.Arch)
-	_, err := ctx.RunCmd(tarCmd)
-	return err
-}
-
-func CheckRunc(ctx *Context) (bool, error) {
-	out, err := ctx.RunCmd("runc --version")
-	return err == nil && strings.Contains(out, ctx.Cfg.Versions.Runc), nil
-}
-
-func InstallRunc(ctx *Context, vFolder string) error {
-	runcPath := fmt.Sprintf("%s/runc/%s/%s/runc.%s", ctx.RemoteTmpDir, ctx.Arch, vFolder, ctx.Arch)
-	_, err := ctx.RunCmd(fmt.Sprintf("install -m 0755 %s /usr/local/bin/runc", runcPath))
-	return err
-}
-
-func CheckContainerdService(ctx *Context) (bool, error) {
-	out, err := ctx.RunCmd("test -e /usr/lib/systemd/system/containerd.service && echo EXISTS || echo MISSING")
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) == "EXISTS", nil
-}
-
-func ConfigureContainerdService(ctx *Context) error {
-	svcSrc := fmt.Sprintf("%s/containerd/containerd.service", ctx.RemoteTmpDir)
-	_, err := ctx.RunCmd(fmt.Sprintf("cp %s /usr/lib/systemd/system/containerd.service", svcSrc))
-	return err
 }
 
 func CheckContainerdRunning(ctx *Context) (bool, error) {

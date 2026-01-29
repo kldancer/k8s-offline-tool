@@ -28,14 +28,8 @@ type NodeInstaller interface {
 	InstallKeepalived() error
 
 	// Containerd Granular Steps
-	CheckContainerdBinaries() (bool, error)
-	InstallContainerdBinaries() error
-
-	CheckRunc() (bool, error)
-	InstallRunc() error
-
-	CheckContainerdService() (bool, error)
-	ConfigureContainerdService() error
+	CheckContainerdPackage() (bool, error)
+	InstallContainerdPackage() error
 
 	CheckContainerdRunning() (bool, error)
 	ConfigureAndStartContainerd() error
