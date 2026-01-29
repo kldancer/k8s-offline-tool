@@ -156,6 +156,7 @@ func loadConfig(path string) *config.Config {
 		InstallMode:           config.InstallModeFull,
 		CommandTimeoutSeconds: int((600 * time.Second).Seconds()),
 		Versions: config.VersionConfig{
+			DockerCE:   config.DockerCEVersions[0],
 			Containerd: config.ContainerdVersions[0],
 			Runc:       config.RuncVersions[0],
 			Nerdctl:    config.NerdctlVersions[0],
@@ -199,6 +200,7 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 		value     *string
 		supported []string
 	}{
+		{"DockerCE", &cfg.Versions.DockerCE, config.DockerCEVersions},
 		{"Containerd", &cfg.Versions.Containerd, config.ContainerdVersions},
 		{"Runc", &cfg.Versions.Runc, config.RuncVersions},
 		{"Nerdctl", &cfg.Versions.Nerdctl, config.NerdctlVersions},

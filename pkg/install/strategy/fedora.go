@@ -141,6 +141,9 @@ func (f *FedoraInstaller) ConfigureGPU() error {
 	rpmPath := fmt.Sprintf("%s/common-tools/%s/rpm/nvidia-container-toolkit*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
 	f.Ctx.RunCmd(fmt.Sprintf("rpm -Uvh %s --nodeps --force", rpmPath))
 	f.Ctx.RunCmd("nvidia-ctk runtime configure --runtime=containerd")
+
+	// default_runtime_name 改为 nvidia
+	f.Ctx.RunCmd("sed -i 's/^\\([[:space:]]*default_runtime_name[[:space:]]*=[[:space:]]*\\)\"runc\"/\\1\"nvidia\"/' /etc/containerd/conf.d/99-nvidia.toml")
 	f.Ctx.RunCmd("systemctl restart containerd")
 	return nil
 }

@@ -42,6 +42,7 @@ type RegistryConfig struct {
 }
 
 type VersionConfig struct {
+	DockerCE   string `yaml:"dockerce"`
 	Containerd string `yaml:"containerd"`
 	Runc       string `yaml:"runc"`
 	Nerdctl    string `yaml:"nerdctl"`

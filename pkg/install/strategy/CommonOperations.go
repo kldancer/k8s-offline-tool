@@ -2,7 +2,6 @@ package strategy
 
 import (
 	"fmt"
-	"path"
 	"strings"
 )
 
@@ -56,51 +55,9 @@ func CheckDockerCEPackage(ctx *Context) (bool, error) {
 	if err != nil {
 		return false, nil
 	}
-	expectedDockerVersion, _ := dockerCEVersion(ctx)
-	dockerOK := strings.Contains(dockerOut, "Docker")
-	if expectedDockerVersion != "" {
-		dockerOK = strings.Contains(dockerOut, expectedDockerVersion)
-	}
-	return dockerOK &&
+	return strings.Contains(dockerOut, ctx.Cfg.Versions.DockerCE) &&
 		strings.Contains(containerdOut, ctx.Cfg.Versions.Containerd) &&
 		strings.Contains(runcOut, ctx.Cfg.Versions.Runc), nil
-}
-
-func dockerCEVersion(ctx *Context) (string, error) {
-	aptCmd := fmt.Sprintf("ls %s/docker-ce/%s/apt/docker-ce_*.deb 2>/dev/null | head -n1", ctx.RemoteTmpDir, ctx.Arch)
-	out, _ := ctx.RunCmd(aptCmd)
-	version := strings.TrimSpace(out)
-	if version == "" {
-		rpmCmd := fmt.Sprintf("ls %s/docker-ce/%s/rpm/docker-ce-*.rpm 2>/dev/null | head -n1", ctx.RemoteTmpDir, ctx.Arch)
-		out, _ := ctx.RunCmd(rpmCmd)
-		version = strings.TrimSpace(out)
-	}
-	if version == "" {
-		return "", nil
-	}
-	base := path.Base(version)
-	if strings.HasPrefix(base, "docker-ce_") {
-		versionPart := strings.TrimSuffix(strings.TrimPrefix(base, "docker-ce_"), ".deb")
-		if idx := strings.Index(versionPart, "_"); idx >= 0 {
-			versionPart = versionPart[:idx]
-		}
-		versionPart = strings.ReplaceAll(versionPart, "%3a", ":")
-		if idx := strings.Index(versionPart, ":"); idx >= 0 {
-			versionPart = versionPart[idx+1:]
-		}
-		if idx := strings.Index(versionPart, "-"); idx >= 0 {
-			versionPart = versionPart[:idx]
-		}
-		return versionPart, nil
-	}
-	if strings.HasPrefix(base, "docker-ce-") {
-		versionPart := strings.TrimSuffix(strings.TrimPrefix(base, "docker-ce-"), ".rpm")
-		if idx := strings.Index(versionPart, "-"); idx >= 0 {
-			versionPart = versionPart[:idx]
-		}
-		return versionPart, nil
-	}
-	return "", nil
 }
 
 func CheckContainerdRunning(ctx *Context) (bool, error) {
@@ -118,7 +75,7 @@ func ConfigureAndStartContainerd(ctx *Context) error {
 
 	// 3. 启动服务
 	ctx.RunCmd("systemctl daemon-reload")
-	_, err := ctx.RunCmd("systemctl enable --now containerd")
+	_, err := ctx.RunCmd("systemctl enable --now containerd || true")
 	return err
 }
 
@@ -201,6 +158,11 @@ func CheckGPUConfig(ctx *Context) (bool, error) {
 	if !ctx.HasGPU {
 		return true, nil
 	}
+
+	if out, err := ctx.RunCmd("test -e /etc/containerd/conf.d/99-nvidia.toml && echo EXISTS || echo MISSING"); err != nil || strings.TrimSpace(out) == "MISSING" {
+		return false, err
+	}
+
 	_, err := ctx.RunCmd("nvidia-container-cli info")
 	return err == nil, nil
 }

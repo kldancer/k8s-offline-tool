@@ -19,20 +19,20 @@ dry_run: false
 registry:
   endpoint: "jusuan.io"
   port: 8080
-  ip: 192.168.1.7
+  ip: 10.10.10.250
   username: "admin"
   password: "Harbor12345"
 
 # 节点列表（按顺序进行安装）
 nodes:
-  - ip: "192.168.1.11"
+  - ip: "10.10.10.227"
     password: "root"
     ssh_port: 22
     is_master: true
-  - ip: "192.168.1.12"
+  - ip: "10.10.10.146"
     password: "root"
     ssh_port: 22
-  - ip: "192.168.1.9"
+  - ip: "10.10.10.170"
     password: "root"
     ssh_port: 22
 

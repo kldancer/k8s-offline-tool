@@ -305,7 +305,7 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.InstallCommonTools,
 			},
 			runner.Step{
-				Name:   "安装 Docker CE 软件包",
+				Name:   "安装 DockerCE 软件包",
 				Check:  m.installer.CheckDockerCEPackage,
 				Action: m.installer.InstallDockerCEPackage,
 			},
@@ -462,7 +462,8 @@ func (m *Manager) Run(dryRun bool) error {
 		)
 	}
 
-	if m.nodeCfg.IsMaster && m.nodeCfg.IsPrimaryMaster {
+	if (m.nodeCfg.IsMaster && !m.globalCfg.HA.Enabled) ||
+		(m.nodeCfg.IsPrimaryMaster && m.globalCfg.HA.Enabled) {
 		steps = append(steps, m.addonSteps()...)
 	}
 

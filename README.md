@@ -29,6 +29,7 @@ install_mode: "full"
 
 # 软件版本定义
 versions:
+  dockerce: "29.2.0"
   containerd: "2.2.1"
   runc: "1.3.4"
   nerdctl: "2.2.1"
@@ -80,7 +81,6 @@ join_command: "kubeadm join 192.168.1.10:6443 --token <token> --discovery-token-
 # 子Master 节点加入集群的命令 (在 is_master: true,is_primary_master: false 的节点上执行)
 master_join_command: ""
 ```
-配置示例见下文
 
 ### 字段解释与默认值
 
@@ -192,12 +192,13 @@ go build -o k8s-offline-tool main.go
 ## 安装步骤解析
 
 
-![Installation-steps.png](doc/Installation-steps.png)
+![Installation-steps.png](doc/installation-steps.png)
 
 
 
 
 ## 使用场景
+配置示例见：[config.yaml](example/config.yaml)、[config-ha.yaml](example/config-ha.yaml)
 
 ### 场景一：离线环境完整安装 Kubernetes 集群
 按顺序部署节点，安装基础工具、容器运行时、配置私有镜像仓库、同步所需镜像、Kubernetes 安装、插件安装，并在第一个 master 节点初始化集群，其他节点加入集群
@@ -282,11 +283,15 @@ root@f1:~# ./k8s-offline-tool -config config.yaml
 
 ## 📦 运行示例
 
+三节点集群安装
 <p align="center">
   <img src="doc/demo.gif" width="900">
-
 </p>
 
+高可用集群安装
+<p align="center">
+  <img src="doc/demo-ha.gif" width="900">
+</p>
 
 
 ## 注意事项

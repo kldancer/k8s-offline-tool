@@ -88,8 +88,19 @@ func (u *UbuntuInstaller) CheckDockerCEPackage() (bool, error) {
 }
 func (u *UbuntuInstaller) InstallDockerCEPackage() error {
 	debPath := fmt.Sprintf("%s/docker-ce/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
+	// apt install会自动启动docker、containerd服务，需先禁止启动
+	if _, err := u.Ctx.RunCmd("systemctl mask --now docker.service docker.socket containerd.service"); err != nil {
+		return err
+	}
 	_, err := u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s || sudo apt -f install", debPath))
-	return err
+	if err != nil {
+		return err
+	}
+
+	if _, err := u.Ctx.RunCmd("systemctl unmask docker.service docker.socket containerd.service"); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (u *UbuntuInstaller) CheckContainerdRunning() (bool, error) {
