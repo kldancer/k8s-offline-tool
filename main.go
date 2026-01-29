@@ -33,10 +33,12 @@ func main() {
 	fmt.Printf("开始%s %d 个节点...\n\n", runMode, len(cfg.Nodes))
 
 	results := make([]nodeResult, 0, len(cfg.Nodes))
+	runIndex := 0
 
 	// 2. 顺序执行, 先执行master节点安装
 	for _, i := range masterNodeOrder(cfg) {
-		result := runNode(cfg, i, os.Stdout, cfg.DryRun)
+		runIndex++
+		result := runNode(cfg, i, runIndex, len(cfg.Nodes), os.Stdout, cfg.DryRun)
 		results = append(results, result)
 		if result.Err != nil {
 			log.Fatal(result.Err)
@@ -45,7 +47,7 @@ func main() {
 	}
 
 	if cfg.InstallMode != config.InstallModeAddonsOnly {
-		workerResults := runWorkersSequentially(cfg, os.Stdout, cfg.DryRun)
+		workerResults := runWorkersSequentially(cfg, &runIndex, os.Stdout, cfg.DryRun)
 		results = append(results, workerResults...)
 		for _, result := range workerResults {
 			if result.Err != nil {
@@ -65,8 +67,8 @@ type nodeResult struct {
 	Err      error
 }
 
-func runNode(cfg *config.Config, i int, writer io.Writer, dryRun bool) nodeResult {
-	err := managerRun(cfg, i, writer, dryRun)
+func runNode(cfg *config.Config, i int, runIndex int, totalNodes int, writer io.Writer, dryRun bool) nodeResult {
+	err := managerRun(cfg, i, runIndex, totalNodes, writer, dryRun)
 	return nodeResult{
 		Index:    i,
 		IP:       cfg.Nodes[i].IP,
@@ -75,21 +77,22 @@ func runNode(cfg *config.Config, i int, writer io.Writer, dryRun bool) nodeResul
 	}
 }
 
-func runWorkersSequentially(cfg *config.Config, writer io.Writer, dryRun bool) []nodeResult {
+func runWorkersSequentially(cfg *config.Config, runIndex *int, writer io.Writer, dryRun bool) []nodeResult {
 	results := make([]nodeResult, 0, len(cfg.Nodes))
 	for i := range cfg.Nodes {
 		if cfg.Nodes[i].IsMaster {
 			continue
 		}
-		result := runNode(cfg, i, writer, dryRun)
+		*runIndex = *runIndex + 1
+		result := runNode(cfg, i, *runIndex, len(cfg.Nodes), writer, dryRun)
 		results = append(results, result)
 	}
 	return results
 }
 
-func managerRun(cfg *config.Config, i int, writer io.Writer, dryRun bool) error {
+func managerRun(cfg *config.Config, i int, runIndex int, totalNodes int, writer io.Writer, dryRun bool) error {
 	// 创建管理器
-	mgr, err := install.NewManager(cfg, &cfg.Nodes[i], writer)
+	mgr, err := install.NewManager(cfg, &cfg.Nodes[i], runIndex, totalNodes, writer)
 	if err != nil {
 		return fmt.Errorf("[%s] Init failed: %v", cfg.Nodes[i].IP, err)
 	}

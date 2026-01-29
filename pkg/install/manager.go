@@ -24,18 +24,20 @@ import (
 
 // Manager 现在对应一个节点的安装任务
 type Manager struct {
-	globalCfg *config.Config
-	nodeCfg   *config.NodeConfig
-	client    *ssh.Client
-	installer strategy.NodeInstaller
-	context   *strategy.Context
-	output    io.Writer
+	globalCfg  *config.Config
+	nodeCfg    *config.NodeConfig
+	client     *ssh.Client
+	installer  strategy.NodeInstaller
+	context    *strategy.Context
+	output     io.Writer
+	nodeIndex  int
+	totalNodes int
 }
 
 var hasMirrorSync = false
 
 // NewManager 创建针对特定节点的管理器
-func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig, output io.Writer) (*Manager, error) {
+func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig, nodeIndex int, totalNodes int, output io.Writer) (*Manager, error) {
 	if output == nil {
 		output = os.Stdout
 	}
@@ -52,10 +54,12 @@ func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig, output io.
 	}
 
 	return &Manager{
-		globalCfg: globalCfg,
-		nodeCfg:   nodeCfg,
-		client:    client,
-		output:    output,
+		globalCfg:  globalCfg,
+		nodeCfg:    nodeCfg,
+		client:     client,
+		output:     output,
+		nodeIndex:  nodeIndex,
+		totalNodes: totalNodes,
 	}, nil
 }
 
@@ -253,8 +257,12 @@ func (m *Manager) Run(dryRun bool) error {
 	// 定义日志前缀
 	fmt.Printf("----------------------------------------------------------------------------------------\n")
 	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
-	fmt.Fprintf(m.output, "%s检测到 %s %s | KernelVersion: %s | Arch: %s | GPU: %v\n", prefix,
-		m.context.SystemName, m.context.SystemVersion, m.context.KernelVersion, m.context.Arch, m.context.HasGPU)
+	role := "worker"
+	if m.nodeCfg.IsMaster {
+		role = "master"
+	}
+	fmt.Fprintf(m.output, "%s(%d/%d %s) 检测到 %s %s | KernelVersion: %s | Arch: %s | GPU: %v\n", prefix,
+		m.nodeIndex, m.totalNodes, role, m.context.SystemName, m.context.SystemVersion, m.context.KernelVersion, m.context.Arch, m.context.HasGPU)
 
 	steps := []runner.Step{
 		{
