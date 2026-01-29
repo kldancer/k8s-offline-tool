@@ -90,28 +90,13 @@ func (f *FedoraInstaller) InstallKeepalived() error {
 }
 
 // --- Containerd Granular ---
-func (f *FedoraInstaller) CheckContainerdBinaries() (bool, error) {
-	return CheckContainerdBinaries(f.Ctx)
+func (f *FedoraInstaller) CheckDockerCEPackage() (bool, error) {
+	return CheckDockerCEPackage(f.Ctx)
 }
-func (f *FedoraInstaller) InstallContainerdBinaries() error {
-	vFolder := f.verPath(f.Ctx.Cfg.Versions.Containerd)
-	return InstallContainerdBinaries(f.Ctx, vFolder)
-}
-
-func (f *FedoraInstaller) CheckRunc() (bool, error) {
-	return CheckRunc(f.Ctx)
-}
-func (f *FedoraInstaller) InstallRunc() error {
-	vFolder := f.verPath(f.Ctx.Cfg.Versions.Runc)
-	return InstallRunc(f.Ctx, vFolder)
-}
-
-func (f *FedoraInstaller) CheckContainerdService() (bool, error) {
-	return CheckContainerdService(f.Ctx)
-}
-
-func (f *FedoraInstaller) ConfigureContainerdService() error {
-	return ConfigureContainerdService(f.Ctx)
+func (f *FedoraInstaller) InstallDockerCEPackage() error {
+	rpmPath := fmt.Sprintf("%s/docker-ce/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
+	_, err := f.Ctx.RunCmd(fmt.Sprintf("sudo dnf install -y %s --disablerepo=\"*\" --nogpgcheck", rpmPath))
+	return err
 }
 
 func (f *FedoraInstaller) CheckContainerdRunning() (bool, error) {

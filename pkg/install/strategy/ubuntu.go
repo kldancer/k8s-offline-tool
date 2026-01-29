@@ -83,28 +83,13 @@ func (u *UbuntuInstaller) InstallKeepalived() error {
 }
 
 // --- Containerd Granular ---
-func (u *UbuntuInstaller) CheckContainerdBinaries() (bool, error) {
-	return CheckContainerdBinaries(u.Ctx)
+func (u *UbuntuInstaller) CheckDockerCEPackage() (bool, error) {
+	return CheckDockerCEPackage(u.Ctx)
 }
-func (u *UbuntuInstaller) InstallContainerdBinaries() error {
-	vFolder := u.verPath(u.Ctx.Cfg.Versions.Containerd)
-	return InstallContainerdBinaries(u.Ctx, vFolder)
-}
-
-func (u *UbuntuInstaller) CheckRunc() (bool, error) {
-	return CheckRunc(u.Ctx)
-}
-func (u *UbuntuInstaller) InstallRunc() error {
-	vFolder := u.verPath(u.Ctx.Cfg.Versions.Runc)
-	return InstallRunc(u.Ctx, vFolder)
-}
-
-func (u *UbuntuInstaller) CheckContainerdService() (bool, error) {
-	return CheckContainerdService(u.Ctx)
-}
-
-func (u *UbuntuInstaller) ConfigureContainerdService() error {
-	return ConfigureContainerdService(u.Ctx)
+func (u *UbuntuInstaller) InstallDockerCEPackage() error {
+	debPath := fmt.Sprintf("%s/docker-ce/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
+	_, err := u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s || sudo apt -f install", debPath))
+	return err
 }
 
 func (u *UbuntuInstaller) CheckContainerdRunning() (bool, error) {

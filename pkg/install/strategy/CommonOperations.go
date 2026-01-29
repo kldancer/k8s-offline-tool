@@ -2,6 +2,7 @@ package strategy
 
 import (
 	"fmt"
+	"path"
 	"strings"
 )
 
@@ -42,41 +43,64 @@ EOF`)
 }
 
 // --- Containerd Granular ---
-func CheckContainerdBinaries(ctx *Context) (bool, error) {
-	out, err := ctx.RunCmd("containerd --version")
-	// 检查版本是否包含配置的版本号
-	return err == nil && strings.Contains(out, ctx.Cfg.Versions.Containerd), nil
-}
-func InstallContainerdBinaries(ctx *Context, vFolder string) error {
-	tarCmd := fmt.Sprintf("tar -C /usr/local -xzf %s/containerd/%s/%s/containerd-%s-linux-%s.tar.gz",
-		ctx.RemoteTmpDir, ctx.Arch, vFolder, ctx.Cfg.Versions.Containerd, ctx.Arch)
-	_, err := ctx.RunCmd(tarCmd)
-	return err
-}
-
-func CheckRunc(ctx *Context) (bool, error) {
-	out, err := ctx.RunCmd("runc --version")
-	return err == nil && strings.Contains(out, ctx.Cfg.Versions.Runc), nil
-}
-
-func InstallRunc(ctx *Context, vFolder string) error {
-	runcPath := fmt.Sprintf("%s/runc/%s/%s/runc.%s", ctx.RemoteTmpDir, ctx.Arch, vFolder, ctx.Arch)
-	_, err := ctx.RunCmd(fmt.Sprintf("install -m 0755 %s /usr/local/bin/runc", runcPath))
-	return err
-}
-
-func CheckContainerdService(ctx *Context) (bool, error) {
-	out, err := ctx.RunCmd("test -e /usr/lib/systemd/system/containerd.service && echo EXISTS || echo MISSING")
+func CheckDockerCEPackage(ctx *Context) (bool, error) {
+	dockerOut, err := ctx.RunCmd("docker --version")
 	if err != nil {
-		return false, err
+		return false, nil
 	}
-	return strings.TrimSpace(out) == "EXISTS", nil
+	containerdOut, err := ctx.RunCmd("containerd --version")
+	if err != nil {
+		return false, nil
+	}
+	runcOut, err := ctx.RunCmd("runc --version")
+	if err != nil {
+		return false, nil
+	}
+	expectedDockerVersion, _ := dockerCEVersion(ctx)
+	dockerOK := strings.Contains(dockerOut, "Docker")
+	if expectedDockerVersion != "" {
+		dockerOK = strings.Contains(dockerOut, expectedDockerVersion)
+	}
+	return dockerOK &&
+		strings.Contains(containerdOut, ctx.Cfg.Versions.Containerd) &&
+		strings.Contains(runcOut, ctx.Cfg.Versions.Runc), nil
 }
 
-func ConfigureContainerdService(ctx *Context) error {
-	svcSrc := fmt.Sprintf("%s/containerd/containerd.service", ctx.RemoteTmpDir)
-	_, err := ctx.RunCmd(fmt.Sprintf("cp %s /usr/lib/systemd/system/containerd.service", svcSrc))
-	return err
+func dockerCEVersion(ctx *Context) (string, error) {
+	aptCmd := fmt.Sprintf("ls %s/docker-ce/%s/apt/docker-ce_*.deb 2>/dev/null | head -n1", ctx.RemoteTmpDir, ctx.Arch)
+	out, _ := ctx.RunCmd(aptCmd)
+	version := strings.TrimSpace(out)
+	if version == "" {
+		rpmCmd := fmt.Sprintf("ls %s/docker-ce/%s/rpm/docker-ce-*.rpm 2>/dev/null | head -n1", ctx.RemoteTmpDir, ctx.Arch)
+		out, _ := ctx.RunCmd(rpmCmd)
+		version = strings.TrimSpace(out)
+	}
+	if version == "" {
+		return "", nil
+	}
+	base := path.Base(version)
+	if strings.HasPrefix(base, "docker-ce_") {
+		versionPart := strings.TrimSuffix(strings.TrimPrefix(base, "docker-ce_"), ".deb")
+		if idx := strings.Index(versionPart, "_"); idx >= 0 {
+			versionPart = versionPart[:idx]
+		}
+		versionPart = strings.ReplaceAll(versionPart, "%3a", ":")
+		if idx := strings.Index(versionPart, ":"); idx >= 0 {
+			versionPart = versionPart[idx+1:]
+		}
+		if idx := strings.Index(versionPart, "-"); idx >= 0 {
+			versionPart = versionPart[:idx]
+		}
+		return versionPart, nil
+	}
+	if strings.HasPrefix(base, "docker-ce-") {
+		versionPart := strings.TrimSuffix(strings.TrimPrefix(base, "docker-ce-"), ".rpm")
+		if idx := strings.Index(versionPart, "-"); idx >= 0 {
+			versionPart = versionPart[:idx]
+		}
+		return versionPart, nil
+	}
+	return "", nil
 }
 
 func CheckContainerdRunning(ctx *Context) (bool, error) {
