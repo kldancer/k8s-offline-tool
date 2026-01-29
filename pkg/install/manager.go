@@ -305,19 +305,9 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.InstallCommonTools,
 			},
 			runner.Step{
-				Name:   "安装 Containerd 二进制文件",
-				Check:  m.installer.CheckContainerdBinaries,
-				Action: m.installer.InstallContainerdBinaries,
-			},
-			runner.Step{
-				Name:   "安装 Runc",
-				Check:  m.installer.CheckRunc,
-				Action: m.installer.InstallRunc,
-			},
-			runner.Step{
-				Name:   "配置 Containerd 服务",
-				Check:  m.installer.CheckContainerdService,
-				Action: m.installer.ConfigureContainerdService,
+				Name:   "安装 Containerd 软件包",
+				Check:  m.installer.CheckContainerdPackage,
+				Action: m.installer.InstallContainerdPackage,
 			},
 			runner.Step{
 				Name:   "配置cgroup 并启动 Containerd",
