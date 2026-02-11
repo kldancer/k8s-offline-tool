@@ -1,0 +1,9 @@
+images:
+  - registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.35.0
+  - docker.io/projecthami/hami:v2.8.0
+  - docker.io/jettech/kube-webhook-certgen:v1.5.2
+  - docker.io/liangjw/kube-webhook-certgen:v1.1.1
+  - docker.io/projecthami/mock-device-plugin:1.0.1
+  - ghcr.io/project-hami/hami-dra-monitor:0.1.0
+  - ghcr.io/project-hami/hami-dra-webhook:0.1.0
+  - ghcr.io/projecthami/k8s-dra-driver:v0.0.1-dev
