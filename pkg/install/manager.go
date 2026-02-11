@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -318,6 +319,21 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.InstallDockerCEPackage,
 			},
 			runner.Step{
+				Name: "安装 Helm",
+				Check: func() (bool, error) {
+					if !m.isPrimaryExecutionNode() {
+						return true, nil
+					}
+					return m.checkHelmInstalled()
+				},
+				Action: func() error {
+					if !m.isPrimaryExecutionNode() {
+						return nil
+					}
+					return m.installHelm()
+				},
+			},
+			runner.Step{
 				Name:   "配置cgroup 并启动 Containerd",
 				Check:  m.installer.CheckContainerdRunning,
 				Action: m.installer.ConfigureAndStartContainerd,
@@ -423,19 +439,6 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.ConfiguraRegistryContainerd,
 			},
 		)
-
-		// full模式、addons模式下，需要同步镜像, 且同步镜像的操作只执行一次
-		if m.globalCfg.InstallMode != config.InstallModeInstallOnly && !hasMirrorSync {
-			steps = append(steps,
-				runner.Step{
-					Name: "同步镜像到私有仓库",
-					Check: func() (bool, error) {
-						return false, nil
-					},
-					Action: m.syncImagesToRegistry,
-				},
-			)
-		}
 	}
 
 	if m.context.HasGPU {
@@ -485,6 +488,16 @@ func (m *Manager) shouldConfigureLoadBalancer() bool {
 
 func (m *Manager) isPrimaryMaster() bool {
 	return m.nodeCfg.IsMaster && m.nodeCfg.IsPrimaryMaster
+}
+
+func (m *Manager) isPrimaryExecutionNode() bool {
+	if !m.nodeCfg.IsMaster {
+		return false
+	}
+	if !m.globalCfg.HA.Enabled {
+		return true
+	}
+	return m.nodeCfg.IsPrimaryMaster
 }
 
 func (m *Manager) masterNodeIPs() []string {
@@ -681,25 +694,22 @@ func (m *Manager) addonSteps() []runner.Step {
 		{
 			Name: "部署 Kube-OVN CNI",
 			Check: func() (bool, error) {
-				if !m.nodeCfg.IsMaster || !m.globalCfg.Addons.KubeOvn.Enabled {
+				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.KubeOvn.Enabled {
 					return true, nil
 				}
 
-				out, err := m.context.RunCmd("test -e /etc/cni/net.d/01-kube-ovn.conflist && echo EXISTS || echo MISSING")
+				out, err := m.context.RunCmd("kubectl -n kube-system get deployment kube-ovn-controller --ignore-not-found -o name")
 				if err != nil {
-					return true, err
+					return false, err
 				}
-				if strings.TrimSpace(out) == "EXISTS" {
-					return true, nil
-				}
-				return false, nil
+				return strings.TrimSpace(out) != "", nil
 			},
 			Action: m.deployKubeOvn,
 		},
 		{
 			Name: "部署 Multus CNI",
 			Check: func() (bool, error) {
-				if !m.nodeCfg.IsMaster || !m.globalCfg.Addons.MultusCNI.Enabled {
+				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.MultusCNI.Enabled {
 					return true, nil
 				}
 
@@ -715,14 +725,32 @@ func (m *Manager) addonSteps() []runner.Step {
 			Action: m.deployMultusCNI,
 		},
 		{
-			Name: "部署 Local Path Storage",
+			Name: "部署 HAMI",
 			Check: func() (bool, error) {
-				if !m.nodeCfg.IsMaster || !m.globalCfg.Addons.LocalPathStorage.Enabled {
+				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.Hami.Enabled {
 					return true, nil
 				}
-				return false, nil
+				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami$' || true")
+				if err != nil {
+					return false, err
+				}
+				return strings.TrimSpace(out) == "hami", nil
 			},
-			Action: m.deployLocalPathStorage,
+			Action: m.deployHami,
+		},
+		{
+			Name: "部署 kube-prometheus-stack",
+			Check: func() (bool, error) {
+				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.KubePrometheus.Enabled {
+					return true, nil
+				}
+				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^kube-prometheus-stack$' || true")
+				if err != nil {
+					return false, err
+				}
+				return strings.TrimSpace(out) == "kube-prometheus-stack", nil
+			},
+			Action: m.deployKubePrometheusStack,
 		},
 	}
 }
@@ -764,8 +792,11 @@ func (m *Manager) syncImagesToRegistry() error {
 	if m.globalCfg.Addons.MultusCNI.Enabled {
 		images = append(images, config.RequiredMultusCNImages...)
 	}
-	if m.globalCfg.Addons.LocalPathStorage.Enabled {
-		images = append(images, config.RequiredLocalPathProvisionerImages...)
+	if m.globalCfg.Addons.Hami.Enabled {
+		images = append(images, config.RequiredHamiImages...)
+	}
+	if m.globalCfg.Addons.KubePrometheus.Enabled {
+		images = append(images, config.RequiredKubePrometheusImages...)
 	}
 
 	type imageSyncItem struct {
@@ -1006,19 +1037,14 @@ func (m *Manager) deployKubeOvn() error {
 	if err := m.ensureAdminConf(); err != nil {
 		return err
 	}
-	versionDir := versionToDir(m.globalCfg.Addons.KubeOvn.Version)
-	installDir := path.Join(m.context.RemoteTmpDir, "cni", "kube-ovn", versionDir)
-	installScript := path.Join(installDir, "install.sh")
-	if registryHost, ok := m.registryHost(); ok {
-		registry := registryHost + "/kubeovn"
-		cmd := fmt.Sprintf("sed -i 's|^REGISTRY=.*|REGISTRY=\"%s\"|' %s", registry, installScript)
-		if _, err := m.context.RunCmd(cmd); err != nil {
-			return err
-		}
+	chartPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "cni", "kube-ovn", "kube-ovn-v1.15.2.tgz")
+	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "cni", "kube-ovn", "values.yaml")
+	if err := m.rewriteHelmValuesFile("kube-ovn-images", valuesPath); err != nil {
+		return err
 	}
-	cmd := fmt.Sprintf("bash %s > /dev/null 2>&1", installScript)
-	m.context.RunCmd(cmd)
-	return nil
+	cmd := fmt.Sprintf("helm install kube-ovn %s -n kube-system -f %s", chartPath, valuesPath)
+	_, err := m.context.RunCmd(cmd)
+	return err
 }
 
 func (m *Manager) deployMultusCNI() error {
@@ -1038,22 +1064,90 @@ func (m *Manager) deployMultusCNI() error {
 	return err
 }
 
-func (m *Manager) deployLocalPathStorage() error {
+func (m *Manager) deployHami() error {
 	if err := m.ensureAdminConf(); err != nil {
 		return err
 	}
-	versionDir := versionToDir(m.globalCfg.Addons.LocalPathStorage.Version)
-	manifestPath := path.Join(m.context.RemoteTmpDir, "local-path-provisioner", versionDir, "local-path-storage.yaml")
-	if registryHost, ok := m.registryHost(); ok {
-		image := registryHost + "/rancher/local-path-provisioner:v0.0.34"
-		cmd := fmt.Sprintf("sed -i 's|docker.io/rancher/local-path-provisioner:v0.0.34|%s|g' %s", image, manifestPath)
+	chartPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "hami", "hami-2.8.0.tgz")
+	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "hami", "values.yaml")
+	if err := m.rewriteHelmValuesFile("hami-images", valuesPath); err != nil {
+		return err
+	}
+	cmd := fmt.Sprintf("helm install hami %s -n kube-system -f %s", chartPath, valuesPath)
+	_, err := m.context.RunCmd(cmd)
+	return err
+}
+
+func (m *Manager) deployKubePrometheusStack() error {
+	if err := m.ensureAdminConf(); err != nil {
+		return err
+	}
+	chartPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "kube-prometheus-stack", "kube-prometheus-stack-81.6.0.tgz")
+	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "kube-prometheus-stack", "values.yaml")
+	if err := m.rewriteHelmValuesFile("kube-prometheus-stack-images", valuesPath); err != nil {
+		return err
+	}
+	cmd := fmt.Sprintf("helm install kube-prometheus-stack %s -n kube-system -f %s", chartPath, valuesPath)
+	_, err := m.context.RunCmd(cmd)
+	return err
+}
+
+func (m *Manager) checkHelmInstalled() (bool, error) {
+	out, err := m.context.RunCmd("helm version --short")
+	if err != nil {
+		return false, nil
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+func (m *Manager) installHelm() error {
+	tarballDir := path.Join(m.context.RemoteTmpDir, "helm", m.context.Arch)
+	cmd := fmt.Sprintf("cd %s && tar -zxvf helm-v*-linux-%s.tar.gz >/dev/null && mv linux-%s/helm /usr/local/bin/helm && rm -rf linux-%s", tarballDir, m.context.Arch, m.context.Arch, m.context.Arch)
+	_, err := m.context.RunCmd(cmd)
+	return err
+}
+
+func (m *Manager) rewriteHelmValuesFile(groupKey, valuesPath string) error {
+	registryHost, ok := m.registryHost()
+	if !ok {
+		return nil
+	}
+	groups, err := config.ImagesByGroup()
+	if err != nil {
+		return err
+	}
+	images := groups[groupKey]
+	if len(images) == 0 {
+		return nil
+	}
+
+	replacements := make(map[string]string)
+	for _, image := range images {
+		srcRepo, _ := splitImage(image)
+		dstRepo, _ := splitImage(replaceImageRegistry(image, registryHost))
+		replacements[srcRepo] = dstRepo
+		srcRegistry := strings.SplitN(srcRepo, "/", 2)[0]
+		if _, exists := replacements[srcRegistry]; !exists {
+			replacements[srcRegistry] = registryHost
+		}
+	}
+
+	keys := make([]string, 0, len(replacements))
+	for key := range replacements {
+		keys = append(keys, key)
+	}
+	slices.SortFunc(keys, func(a, b string) int {
+		return len(b) - len(a)
+	})
+
+	for _, oldValue := range keys {
+		newValue := replacements[oldValue]
+		cmd := fmt.Sprintf("sed -i 's|%s|%s|g' %s", regexp.QuoteMeta(oldValue), newValue, valuesPath)
 		if _, err := m.context.RunCmd(cmd); err != nil {
 			return err
 		}
 	}
-	cmd := fmt.Sprintf("kubectl apply -f %s", manifestPath)
-	_, err := m.context.RunCmd(cmd)
-	return err
+	return nil
 }
 
 func (m *Manager) shouldIncludeAddonPath(p string, isDir bool) bool {
@@ -1084,7 +1178,8 @@ func (m *Manager) isAddonPath(p string) bool {
 	return p == "cni" ||
 		strings.HasPrefix(p, "cni/kube-ovn") ||
 		strings.HasPrefix(p, "cni/multus-cni") ||
-		strings.HasPrefix(p, "local-path-provisioner")
+		p == "helm-resource" ||
+		strings.HasPrefix(p, "helm-resource/")
 }
 
 func (m *Manager) isAddonPathEnabled(p string, isDir bool) bool {
@@ -1092,21 +1187,25 @@ func (m *Manager) isAddonPathEnabled(p string, isDir bool) bool {
 		return m.globalCfg.Addons.KubeOvn.Enabled || m.globalCfg.Addons.MultusCNI.Enabled
 	}
 	if strings.HasPrefix(p, "cni/kube-ovn") {
-		if !m.globalCfg.Addons.KubeOvn.Enabled {
-			return false
-		}
-		versionDir := path.Join("cni", "kube-ovn", versionToDir(m.globalCfg.Addons.KubeOvn.Version))
-		return p == "cni/kube-ovn" || p == versionDir || strings.HasPrefix(p, versionDir+"/")
+		return m.globalCfg.Addons.KubeOvn.Enabled
 	}
 	if strings.HasPrefix(p, "cni/multus-cni") {
 		return m.globalCfg.Addons.MultusCNI.Enabled
 	}
-	if strings.HasPrefix(p, "local-path-provisioner") {
-		if !m.globalCfg.Addons.LocalPathStorage.Enabled {
-			return false
-		}
-		versionDir := path.Join("local-path-provisioner", versionToDir(m.globalCfg.Addons.LocalPathStorage.Version))
-		return p == "local-path-provisioner" || p == versionDir || strings.HasPrefix(p, versionDir+"/")
+	if p == "helm-resource" {
+		return m.globalCfg.Addons.KubeOvn.Enabled || m.globalCfg.Addons.Hami.Enabled || m.globalCfg.Addons.KubePrometheus.Enabled
+	}
+	if strings.HasPrefix(p, "helm-resource/cni/kube-ovn") {
+		return m.globalCfg.Addons.KubeOvn.Enabled
+	}
+	if strings.HasPrefix(p, "helm-resource/hami") {
+		return m.globalCfg.Addons.Hami.Enabled
+	}
+	if strings.HasPrefix(p, "helm-resource/kube-prometheus-stack") {
+		return m.globalCfg.Addons.KubePrometheus.Enabled
+	}
+	if strings.HasPrefix(p, "helm-resource/cni") {
+		return m.globalCfg.Addons.KubeOvn.Enabled
 	}
 	return false
 }

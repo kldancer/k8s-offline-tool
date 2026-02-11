@@ -50,9 +50,10 @@ type VersionConfig struct {
 }
 
 type AddonsConfig struct {
-	KubeOvn          AddonComponentConfig `yaml:"kube_ovn"`
-	MultusCNI        AddonComponentConfig `yaml:"multus_cni"`
-	LocalPathStorage AddonComponentConfig `yaml:"local_path_storage"`
+	KubeOvn        AddonComponentConfig `yaml:"kube_ovn"`
+	MultusCNI      AddonComponentConfig `yaml:"multus_cni"`
+	Hami           AddonComponentConfig `yaml:"hami"`
+	KubePrometheus AddonComponentConfig `yaml:"kube_prometheus_stack"`
 }
 
 type AddonComponentConfig struct {

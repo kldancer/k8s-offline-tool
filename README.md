@@ -6,9 +6,9 @@
 
 - 离线安装基础组件：linux通用工具包、containerd、runc、nerdctl、kubeadm/kubelet/kubectl。
 - 在 master 节点初始化集群，并自动生成 worker 的 join command，若配置中没有master节点，需手动配置worker 节点的 join command。
-- 支持私有镜像仓库：同步所需镜像到私有 registry，并在部署时重写镜像地址。前提：程序执行的本地环境以配置能访问该私有仓库。
+- 支持私有镜像仓库：在部署时重写镜像地址到私有 registry。
 - 支持预检查模式，检查各安装步骤是否需要执行，不执行安装动作。
-- 支持安装模式选择，从零安装并初始化集群还是在已有集群中仅部署k8s组件，组件部署：kube-ovn、multus-cni、local-path-storage（可选）。
+- 支持安装模式选择，从零安装并初始化集群还是在已有集群中仅部署k8s组件，组件部署：kube-ovn、multus-cni、hami、kube-prometheus-stack（可选）。
 
 ## 配置说明
 
@@ -39,13 +39,16 @@ versions:
 addons:
   kube_ovn:
     enabled: false
-    version: "1.15.0"
+    version: "1.15.2"
   multus_cni:
     enabled: false
     version: "snapshot-thick"
-  local_path_storage:
+  hami:
     enabled: false
-    version: "0.0.34"
+    version: "2.8.0"
+  kube_prometheus_stack:
+    enabled: false
+    version: "81.6.0"
 
 # 仅执行预检查，不执行安装动作
 dry_run: true
@@ -120,8 +123,10 @@ master_join_command: ""
 | `kube_ovn.version` | `1.15.0` | kube-ovn 版本。 |
 | `multus_cni.enabled` | `false` | 是否部署 multus-cni。 |
 | `multus_cni.version` | `snapshot-thick` | multus-cni 版本。 |
-| `local_path_storage.enabled` | `false` | 是否部署 local-path-storage。 |
-| `local_path_storage.version` | `0.0.34` | local-path-storage 版本。 |
+| `hami.enabled` | `false` | 是否部署 hami。 |
+| `hami.version` | `2.8.0` | hami 版本。 |
+| `kube_prometheus_stack.enabled` | `false` | 是否部署 kube-prometheus-stack。 |
+| `kube_prometheus_stack.version` | `81.6.0` | kube-prometheus-stack 版本。 |
 
 #### `registry`
 
@@ -223,7 +228,9 @@ addons:
     enabled: true
   multus_cni:
     enabled: true
-  local_path_storage:
+  hami:
+    enabled: true
+  kube_prometheus_stack:
     enabled: true
     
 # 仅执行预检查，正式安装前可先执行预检查模式看看
@@ -250,7 +257,9 @@ addons:
     enabled: true
   multus_cni:
     enabled: false
-  local_path_storage:
+  hami:
+    enabled: true
+  kube_prometheus_stack:
     enabled: true
 root@f1:~# ./k8s-offline-tool -config config.yaml
 ```

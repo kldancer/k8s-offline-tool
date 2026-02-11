@@ -1,3 +1,0 @@
-images:
-  - docker.io/kubeovn/kube-ovn:v1.15.2
-  - docker.io/kubeovn/vpc-nat-gateway:v1.15.2
