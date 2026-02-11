@@ -351,80 +351,50 @@ func (m *Manager) Run(dryRun bool) error {
 		)
 	}
 
-	if m.nodeCfg.IsMaster {
+	if m.shouldConfigureLoadBalancer() {
 		steps = append(steps,
 			runner.Step{
 				Name: "配置 LB Sysctl 内核参数",
 				Check: func() (bool, error) {
-					if !m.shouldConfigureLoadBalancer() {
-						return true, nil
-					}
 					return m.checkLoadBalancerSysctl()
 				},
 				Action: func() error {
-					if !m.shouldConfigureLoadBalancer() {
-						return nil
-					}
 					return m.configureLoadBalancerSysctl()
 				},
 			},
 			runner.Step{
 				Name: "安装 HAProxy",
 				Check: func() (bool, error) {
-					if !m.shouldConfigureLoadBalancer() {
-						return true, nil
-					}
 					return m.installer.CheckHAProxy()
 				},
 				Action: func() error {
-					if !m.shouldConfigureLoadBalancer() {
-						return nil
-					}
 					return m.installer.InstallHAProxy()
 				},
 			},
 			runner.Step{
 				Name: "配置 HAProxy",
 				Check: func() (bool, error) {
-					if !m.shouldConfigureLoadBalancer() {
-						return true, nil
-					}
 					return m.checkHAProxyConfig()
 				},
 				Action: func() error {
-					if !m.shouldConfigureLoadBalancer() {
-						return nil
-					}
 					return m.configureHAProxy()
 				},
 			},
 			runner.Step{
 				Name: "安装 Keepalived",
 				Check: func() (bool, error) {
-					if !m.shouldConfigureLoadBalancer() {
-						return true, nil
-					}
 					return m.installer.CheckKeepalived()
 				},
 				Action: func() error {
-					if !m.shouldConfigureLoadBalancer() {
-						return nil
-					}
 					return m.installer.InstallKeepalived()
 				},
 			},
 			runner.Step{
 				Name: "配置 Keepalived",
 				Check: func() (bool, error) {
-					if !m.shouldConfigureLoadBalancer() {
-						return true, nil
-					}
 					return m.checkKeepalivedConfig()
 				},
 				Action: func() error {
-					if !m.shouldConfigureLoadBalancer() {
-						return nil
-					}
 					return m.configureKeepalived()
 				},
 			},
