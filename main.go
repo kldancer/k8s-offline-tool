@@ -147,13 +147,17 @@ func loadConfig(path string) *config.Config {
 				Enabled: false,
 				Version: config.KubeOvnVersions[0],
 			},
-			LocalPathStorage: config.AddonComponentConfig{
-				Enabled: false,
-				Version: config.LocalPathStorageVersions[0],
-			},
 			MultusCNI: config.AddonComponentConfig{
 				Enabled: false,
 				Version: config.MultusCNIVersions[0],
+			},
+			Hami: config.AddonComponentConfig{
+				Enabled: false,
+				Version: config.HamiVersions[0],
+			},
+			KubePrometheus: config.AddonComponentConfig{
+				Enabled: false,
+				Version: config.KubePrometheusVersions[0],
 			},
 		},
 		InstallMode:           config.InstallModeFull,
@@ -210,7 +214,8 @@ func applyDefaultsAndValidate(cfg *config.Config) error {
 		{"Kubernetes", &cfg.Versions.K8s, config.K8sVersions},
 		{"Kube-OVN", &cfg.Addons.KubeOvn.Version, config.KubeOvnVersions},
 		{"Multus CNI", &cfg.Addons.MultusCNI.Version, config.MultusCNIVersions},
-		{"Local Path Storage", &cfg.Addons.LocalPathStorage.Version, config.LocalPathStorageVersions},
+		{"HAMI", &cfg.Addons.Hami.Version, config.HamiVersions},
+		{"Kube Prometheus Stack", &cfg.Addons.KubePrometheus.Version, config.KubePrometheusVersions},
 	}
 
 	for _, v := range versions {

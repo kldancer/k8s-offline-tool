@@ -4,13 +4,16 @@ install_mode: "full"
 addons:
   kube_ovn:
     enabled: true
-    version: "1.15.0"
+    version: "1.15.2"
   multus_cni:
     enabled: true
     version: "snapshot-thick"
-  local_path_storage:
-    enabled: true
-    version: "0.0.34"
+  hami:
+    enabled: false
+    version: "2.8.0"
+  kube_prometheus_stack:
+    enabled: false
+    version: "81.6.0"
 
 # 仅执行预检查，不执行安装动作
 dry_run: false
