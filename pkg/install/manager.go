@@ -1,18 +1,15 @@
 package install
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/fs"
-	"net/url"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -327,9 +324,6 @@ func (m *Manager) Run(dryRun bool) error {
 					return m.checkHelmInstalled()
 				},
 				Action: func() error {
-					if !m.isPrimaryExecutionNode() {
-						return nil
-					}
 					return m.installHelm()
 				},
 			},
@@ -730,269 +724,6 @@ func (m *Manager) registryHost() (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf("%s:%d", m.globalCfg.Registry.Endpoint, m.globalCfg.Registry.Port), true
-}
-
-func (m *Manager) imageClient() (string, error) {
-	if _, err := m.runLocalCmd("docker --version"); err == nil {
-		return "docker", nil
-	}
-	if _, err := m.runLocalCmd("nerdctl --version"); err == nil {
-		return "nerdctl", nil
-	}
-	if _, err := m.runLocalCmd("ctr version"); err == nil {
-		return "ctr", nil
-	}
-	return "", fmt.Errorf("docker, nerdctl, or ctr is required to sync images")
-}
-
-func (m *Manager) syncImagesToRegistry() error {
-	registryHost, ok := m.registryHost()
-	if !ok {
-		return nil
-	}
-	client, err := m.imageClient()
-	if err != nil {
-		return err
-	}
-	images := config.RequiredK8sImages
-
-	if m.globalCfg.Addons.KubeOvn.Enabled {
-		images = append(images, config.RequiredKubeOvnImages...)
-	}
-	if m.globalCfg.Addons.MultusCNI.Enabled {
-		images = append(images, config.RequiredMultusCNImages...)
-	}
-	if m.globalCfg.Addons.Hami.Enabled {
-		images = append(images, config.RequiredHamiImages...)
-	}
-	if m.globalCfg.Addons.KubePrometheus.Enabled {
-		images = append(images, config.RequiredKubePrometheusImages...)
-	}
-
-	type imageSyncItem struct {
-		source   string
-		target   string
-		project  string
-		repoName string
-		tag      string
-	}
-
-	projectCache := make(map[string]bool)
-	syncList := make([]imageSyncItem, 0, len(images))
-	for _, image := range images {
-		target := replaceImageRegistry(image, registryHost)
-		repo, tag := splitImage(target)
-		repoPath := strings.TrimPrefix(repo, registryHost+"/")
-		project, repoName, err := splitHarborRepository(repoPath)
-		if err != nil {
-			return err
-		}
-		exists, ok := projectCache[project]
-		if !ok {
-			exists, err = m.harborProjectExists(registryHost, project)
-			if err != nil {
-				return err
-			}
-			projectCache[project] = exists
-		}
-		if exists {
-			tagExists, err := m.harborTagExists(registryHost, project, repoName, tag)
-			if err != nil {
-				return err
-			}
-			if tagExists {
-				continue
-			}
-		}
-		syncList = append(syncList, imageSyncItem{
-			source:   image,
-			target:   target,
-			project:  project,
-			repoName: repoName,
-			tag:      tag,
-		})
-	}
-
-	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
-	if len(syncList) == 0 {
-		fmt.Fprintf(m.output, "%s  └─ 镜像已全部同步，无需重复同步\n", prefix)
-		hasMirrorSync = true
-		return nil
-	}
-
-	fmt.Fprintf(m.output, "%s  └─ 需要同步镜像（%d）：\n", prefix, len(syncList))
-	for _, item := range syncList {
-		fmt.Fprintf(m.output, "%s    - %s\n", prefix, item.source)
-	}
-
-	current := 0
-	total := len(syncList)
-	const barWidth = 20
-
-	for _, item := range syncList {
-		if !projectCache[item.project] {
-			if err := m.createHarborProject(registryHost, item.project); err != nil {
-				return err
-			}
-			projectCache[item.project] = true
-		}
-
-		displayIndex := current + 1
-		percent := float64(displayIndex) / float64(total) * 100
-		filled := int(float64(barWidth) * float64(displayIndex) / float64(total))
-		if filled > barWidth {
-			filled = barWidth
-		}
-		bar := strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled)
-		if filled > 0 && filled < barWidth {
-			bar = strings.Repeat("=", filled-1) + ">" + strings.Repeat(" ", barWidth-filled)
-		}
-
-		fmt.Fprintf(m.output, "\r%s  └─ Syncing: [%s] %3.0f%% (%d/%d) %s", prefix, bar, percent, displayIndex, total, item.source)
-
-		switch client {
-		case "docker":
-			if _, err := m.runLocalCmd(fmt.Sprintf("docker pull --platform=linux/%s %s", m.context.Arch, item.source)); err != nil {
-				return err
-			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("docker tag %s %s", item.source, item.target)); err != nil {
-				return err
-			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("docker push %s", item.target)); err != nil {
-				return err
-			}
-		case "nerdctl":
-			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl pull --platform=linux/%s %s", m.context.Arch, item.source)); err != nil {
-				return err
-			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl tag %s %s", item.source, item.target)); err != nil {
-				return err
-			}
-			// 不用添加 --insecure-registry，因为已经配置了http
-			if _, err := m.runLocalCmd(fmt.Sprintf("nerdctl push %s", item.target)); err != nil {
-				return err
-			}
-		case "ctr":
-			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images pull --platform=linux/%s %s", m.context.Arch, item.source)); err != nil {
-				return err
-			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images tag %s %s", item.source, item.target)); err != nil {
-				return err
-			}
-			if _, err := m.runLocalCmd(fmt.Sprintf("ctr images push --plain-http %s", item.target)); err != nil {
-				return err
-			}
-		}
-		current++
-		if current == total {
-			fmt.Fprint(m.output, "\n")
-		}
-	}
-	hasMirrorSync = true
-	return nil
-}
-
-func (m *Manager) harborAuthArgs() string {
-	username := strings.TrimSpace(m.globalCfg.Registry.Username)
-	if username == "" {
-		return ""
-	}
-	creds := username + ":" + m.globalCfg.Registry.Password
-	return fmt.Sprintf("-u %q", creds)
-}
-
-func (m *Manager) harborRequest(method, requestURL string, body []byte) (int, string, error) {
-	authArgs := m.harborAuthArgs()
-	bodyArgs := ""
-	if len(body) > 0 {
-		bodyArgs = fmt.Sprintf("-H 'Content-Type: application/json' -d %q", string(body))
-	}
-	cmd := fmt.Sprintf("curl -s -w 'HTTPSTATUS:%%{http_code}' -X %s %s %s %q", method, authArgs, bodyArgs, requestURL)
-	out, err := m.runLocalCmd(cmd)
-	if err != nil {
-		return 0, "", err
-	}
-	statusIndex := strings.LastIndex(out, "HTTPSTATUS:")
-	if statusIndex == -1 {
-		return 0, "", fmt.Errorf("unexpected harbor response: %s", out)
-	}
-	bodyText := strings.TrimSpace(out[:statusIndex])
-	statusText := strings.TrimSpace(out[statusIndex+len("HTTPSTATUS:"):])
-	status, err := strconv.Atoi(statusText)
-	if err != nil {
-		return 0, "", fmt.Errorf("invalid harbor status: %s", statusText)
-	}
-	return status, bodyText, nil
-}
-
-func (m *Manager) harborProjectExists(registryHost, project string) (bool, error) {
-	requestURL := fmt.Sprintf("http://%s/api/v2.0/projects?name=%s", registryHost, url.QueryEscape(project))
-	status, body, err := m.harborRequest("GET", requestURL, nil)
-	if err != nil {
-		return false, err
-	}
-	if status == 401 || status == 403 {
-		return false, fmt.Errorf("harbor authentication failed for project %s", project)
-	}
-	if status != 200 {
-		return false, fmt.Errorf("harbor project query failed with status %d: %s", status, body)
-	}
-	var projects []map[string]interface{}
-	if err := json.Unmarshal([]byte(body), &projects); err != nil {
-		return false, fmt.Errorf("failed to parse harbor project response: %w", err)
-	}
-	return len(projects) > 0, nil
-}
-
-func (m *Manager) createHarborProject(registryHost, project string) error {
-	payload := map[string]interface{}{
-		"project_name": project,
-		"metadata": map[string]string{
-			"public": "true",
-		},
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	requestURL := fmt.Sprintf("http://%s/api/v2.0/projects", registryHost)
-	status, body, err := m.harborRequest("POST", requestURL, data)
-	if err != nil {
-		return err
-	}
-	if status == 201 || status == 409 {
-		return nil
-	}
-	return fmt.Errorf("harbor project create failed with status %d: %s", status, body)
-}
-
-func (m *Manager) harborTagExists(registryHost, project, repoName, tag string) (bool, error) {
-	requestURL := fmt.Sprintf(
-		"http://%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s",
-		registryHost,
-		url.PathEscape(project),
-		url.PathEscape(repoName),
-		url.PathEscape(tag),
-	)
-	status, body, err := m.harborRequest("GET", requestURL, nil)
-	if err != nil {
-		return false, err
-	}
-	if status == 200 {
-		return true, nil
-	}
-	if status == 404 {
-		return false, nil
-	}
-	return false, fmt.Errorf("harbor artifact query failed with status %d: %s", status, body)
-}
-
-func splitHarborRepository(repoPath string) (string, string, error) {
-	parts := strings.SplitN(repoPath, "/", 2)
-	if len(parts) < 2 {
-		return "", "", fmt.Errorf("invalid harbor repository path: %s", repoPath)
-	}
-	return parts[0], parts[1], nil
 }
 
 func (m *Manager) ensureAdminConf() error {
