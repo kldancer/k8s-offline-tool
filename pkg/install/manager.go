@@ -1,9 +1,10 @@
 package install
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path"
@@ -13,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s-offline-tool/pkg/assets"
 	"k8s-offline-tool/pkg/config"
 	"k8s-offline-tool/pkg/install/strategy"
 	"k8s-offline-tool/pkg/runner"
@@ -30,6 +30,20 @@ type Manager struct {
 	output     io.Writer
 	nodeIndex  int
 	totalNodes int
+}
+
+func (m *Manager) calculateLocalHash() (string, error) {
+	f, err := os.Open(m.globalCfg.ResourcePackage)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // NewManager 创建针对特定节点的管理器
@@ -119,106 +133,39 @@ echo "${name}|${version}|${kernel}|${gpu}"
 }
 
 func (m *Manager) distributeResources() error {
-	fsys, err := assets.GetFileSystem()
+	localHash, err := m.calculateLocalHash()
+	if err != nil {
+		return fmt.Errorf("failed to calculate local resource hash: %v", err)
+	}
+
+	remotePkgPath := path.Join(m.context.RemoteTmpDir, "resources.tar.gz")
+	remoteMarkerPath := path.Join(m.context.RemoteTmpDir, ".extracted_success")
+
+	// 上传压缩包
+	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
+	fmt.Fprintf(m.output, "%s  └─ 正在分发离线资源包: %s\n", prefix, filepath.Base(m.globalCfg.ResourcePackage))
+
+	f, err := os.Open(m.globalCfg.ResourcePackage)
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 
-	targetArch := m.context.Arch
-	isFedora := strings.Contains(m.installer.Name(), "Fedora")
-
-	shouldSkip := func(rawPath string, isDir bool) bool {
-		p := filepath.ToSlash(rawPath)
-		if targetArch == "amd64" && strings.Contains(p, "arm64") {
-			return true
-		}
-		if targetArch == "arm64" && strings.Contains(p, "amd64") {
-			return true
-		}
-		if isFedora && strings.Contains(p, "/apt") {
-			return true
-		}
-		if !isFedora && strings.Contains(p, "/rpm") {
-			return true
-		}
-		if !m.context.HasGPU && strings.Contains(p, "nvidia-container") {
-			return true
-		}
-		if m.isLoadBalancerPath(p) && !m.shouldIncludeLoadBalancerPath() {
-			return true
-		}
-		if !m.shouldIncludeAddonPath(p, isDir) {
-			return true
-		}
-		return false
+	if err := m.client.WriteFile(remotePkgPath, f); err != nil {
+		return fmt.Errorf("upload resource package failed: %v", err)
 	}
 
-	type fileItem struct {
-		relPath   string
-		slashPath string
-	}
-	var files []fileItem
-
-	err = fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if shouldSkip(path, d.IsDir()) {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if !d.IsDir() {
-			files = append(files, fileItem{
-				relPath:   path,
-				slashPath: filepath.ToSlash(path),
-			})
-		}
-		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("failed to scan files: %v", err)
+	// 3. 远端清理并解压
+	fmt.Fprintf(m.output, "%s  └─ 正在远端解压资源...\n", prefix)
+	extractCmd := fmt.Sprintf("cd %s && tar -xzf resources.tar.gz", m.context.RemoteTmpDir)
+	if _, err := m.client.RunCommand(extractCmd); err != nil {
+		return fmt.Errorf("extract resource package failed: %v", err)
 	}
 
-	totalFiles := len(files)
-	if totalFiles == 0 {
-		return nil
-	}
-
-	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
-	for i, file := range files {
-		current := i + 1
-		fileName := path.Base(file.slashPath)
-		if len(fileName) > 25 {
-			fileName = fileName[:22] + "..."
-		}
-
-		percent := float64(current) / float64(totalFiles) * 100
-		const barWidth = 20
-		filled := int(float64(barWidth) * float64(current) / float64(totalFiles))
-		bar := strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled)
-		if filled > 0 && filled < barWidth {
-			bar = strings.Repeat("=", filled-1) + ">" + strings.Repeat(" ", barWidth-filled)
-		}
-
-		fmt.Fprintf(m.output, "\r%s  └─ Syncing: [%s] %3.0f%% (%d/%d) %-25s", prefix, bar, percent, current, totalFiles, fileName)
-
-		f, err := fsys.Open(file.relPath)
-		if err != nil {
-			return err
-		}
-
-		remotePath := path.Join(m.context.RemoteTmpDir, file.slashPath)
-		if err := m.client.WriteFile(remotePath, f); err != nil {
-			f.Close()
-			return fmt.Errorf("upload %s failed: %v", fileName, err)
-		}
-		f.Close()
-
-		if current == totalFiles {
-			fmt.Fprint(m.output, "\n")
-		}
+	// 4. 写入标记位
+	markCmd := fmt.Sprintf("echo '%s' > %s", localHash, remoteMarkerPath)
+	if _, err := m.client.RunCommand(markCmd); err != nil {
+		return fmt.Errorf("failed to write success marker: %v", err)
 	}
 
 	return nil
@@ -243,11 +190,14 @@ func (m *Manager) Run(dryRun bool) error {
 		{
 			Name: "分发离线资源",
 			Check: func() (bool, error) {
-				out, err := m.client.RunCommand(fmt.Sprintf("test -d %q && echo EXISTS || echo MISSING", m.context.RemoteTmpDir))
+				localHash, err := m.calculateLocalHash()
 				if err != nil {
-					return false, nil
+					return false, err
 				}
-				return strings.TrimSpace(out) == "EXISTS", nil // 存在
+				remoteMarkerPath := path.Join(m.context.RemoteTmpDir, ".extracted_success")
+				checkCmd := fmt.Sprintf("cat %s 2>/dev/null || echo 'MISSING'", remoteMarkerPath)
+				remoteContent, _ := m.client.RunCommand(checkCmd)
+				return strings.TrimSpace(remoteContent) == localHash, nil
 			},
 			Action: m.distributeResources,
 		},
@@ -821,68 +771,6 @@ func (m *Manager) rewriteHelmValuesFile(groupKey, valuesPath string) error {
 		}
 	}
 	return nil
-}
-
-func (m *Manager) shouldIncludeAddonPath(p string, isDir bool) bool {
-	// 只有主 Master 节点才同步 Addon 资源
-	if m.isAddonPath(p) {
-		if !m.isPrimaryExecutionNode() {
-			return false
-		}
-		return m.isAddonPathEnabled(p, isDir)
-	}
-
-	if m.globalCfg.InstallMode == config.InstallModeAddonsOnly {
-		return false
-	}
-	return true
-}
-
-func (m *Manager) isLoadBalancerPath(p string) bool {
-	return p == "haproxy" ||
-		strings.HasPrefix(p, "haproxy/") ||
-		p == "keepalived" ||
-		strings.HasPrefix(p, "keepalived/")
-}
-
-func (m *Manager) shouldIncludeLoadBalancerPath() bool {
-	return m.shouldConfigureLoadBalancer()
-}
-
-func (m *Manager) isAddonPath(p string) bool {
-	return p == "cni" ||
-		strings.HasPrefix(p, "cni/multus-cni") ||
-		p == "helm-resource" ||
-		strings.HasPrefix(p, "helm-resource/")
-}
-
-func (m *Manager) isAddonPathEnabled(p string, isDir bool) bool {
-	if p == "cni" {
-		return m.globalCfg.Addons.KubeOvn.Enabled || m.globalCfg.Addons.MultusCNI.Enabled
-	}
-	if strings.HasPrefix(p, "cni/multus-cni") {
-		return m.globalCfg.Addons.MultusCNI.Enabled
-	}
-	if p == "helm-resource" {
-		return m.globalCfg.Addons.KubeOvn.Enabled || m.globalCfg.Addons.Hami.Enabled || m.globalCfg.Addons.KubePrometheus.Enabled
-	}
-	if strings.HasPrefix(p, "helm-resource/cni/kube-ovn") {
-		return m.globalCfg.Addons.KubeOvn.Enabled
-	}
-	if strings.HasPrefix(p, "helm-resource/hami") {
-		return m.globalCfg.Addons.Hami.Enabled
-	}
-	if strings.HasPrefix(p, "helm-resource/kube-prometheus-stack") {
-		return m.globalCfg.Addons.KubePrometheus.Enabled
-	}
-	if strings.HasPrefix(p, "helm-resource/cni") {
-		return m.globalCfg.Addons.KubeOvn.Enabled
-	}
-	return false
-}
-
-func versionToDir(version string) string {
-	return strings.ReplaceAll(version, ".", "-")
 }
 
 func splitImage(image string) (string, string) {

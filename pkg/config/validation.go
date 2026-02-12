@@ -17,6 +17,9 @@ func stringInSlice(str string, slice []string) bool {
 
 // ApplyDefaultsAndValidate applies default values and validates the configuration
 func ApplyDefaultsAndValidate(cfg *Config) error {
+	if cfg.ResourcePackage == "" {
+		return errors.New("Error: resource_package is required in config.yaml")
+	}
 	if len(cfg.Nodes) == 0 {
 		return errors.New("Error: No nodes defined in config.yaml")
 	}

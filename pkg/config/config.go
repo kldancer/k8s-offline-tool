@@ -2,10 +2,11 @@ package config
 
 type Config struct {
 	// 全局配置
-	Registry RegistryConfig `yaml:"registry"`
-	Versions VersionConfig  `yaml:"versions"`
-	Addons   AddonsConfig   `yaml:"addons"`
-	HA       HAConfig       `yaml:"ha"`
+	Registry        RegistryConfig `yaml:"registry"`
+	Versions        VersionConfig  `yaml:"versions"`
+	Addons          AddonsConfig   `yaml:"addons"`
+	HA              HAConfig       `yaml:"ha"`
+	ResourcePackage string         `yaml:"resource_package"` // 资源包本地路径
 
 	// 默认 SSH 配置 (如果 Node 中未指定则使用此默认值)
 	SSHPort int    `yaml:"ssh_port"`

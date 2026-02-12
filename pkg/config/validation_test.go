@@ -20,6 +20,7 @@ func TestApplyDefaultsAndValidate(t *testing.T) {
 		{
 			name: "Valid basic config",
 			cfg: &Config{
+				ResourcePackage: "./resources.tar.gz",
 				Nodes: []NodeConfig{
 					{IP: "192.168.1.1", Password: "pass", IsMaster: true},
 				},
@@ -30,6 +31,7 @@ func TestApplyDefaultsAndValidate(t *testing.T) {
 		{
 			name: "Missing node IP",
 			cfg: &Config{
+				ResourcePackage: "./resources.tar.gz",
 				Nodes: []NodeConfig{
 					{IP: "", Password: "pass", IsMaster: true},
 				},
@@ -40,6 +42,7 @@ func TestApplyDefaultsAndValidate(t *testing.T) {
 		{
 			name: "Invalid HA config (less than 3 masters)",
 			cfg: &Config{
+				ResourcePackage: "./resources.tar.gz",
 				Nodes: []NodeConfig{
 					{IP: "192.168.1.1", Password: "pass", IsMaster: true, IsPrimaryMaster: true, Interface: "eth0"},
 				},

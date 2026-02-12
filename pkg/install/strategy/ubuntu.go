@@ -64,7 +64,7 @@ func (u *UbuntuInstaller) CheckHAProxy() (bool, error) {
 }
 
 func (u *UbuntuInstaller) InstallHAProxy() error {
-	debPath := fmt.Sprintf("%s/haproxy/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
+	debPath := fmt.Sprintf("%s/ha/haproxy/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
 	_, err := u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s || sudo apt -f install", debPath))
 	return err
 }
@@ -75,7 +75,7 @@ func (u *UbuntuInstaller) CheckKeepalived() (bool, error) {
 }
 
 func (u *UbuntuInstaller) InstallKeepalived() error {
-	debPath := fmt.Sprintf("%s/keepalived/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
+	debPath := fmt.Sprintf("%s/ha/keepalived/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
 	_, err := u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s || sudo apt -f install", debPath))
 	return err
 }

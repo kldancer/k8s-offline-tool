@@ -70,7 +70,7 @@ func (f *FedoraInstaller) CheckHAProxy() (bool, error) {
 }
 
 func (f *FedoraInstaller) InstallHAProxy() error {
-	rpmPath := fmt.Sprintf("%s/haproxy/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
+	rpmPath := fmt.Sprintf("%s/ha/haproxy/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
 	_, err := f.Ctx.RunCmd(fmt.Sprintf("sudo dnf install -y %s --disablerepo=\"*\" --nogpgcheck", rpmPath))
 	return err
 }
@@ -81,7 +81,7 @@ func (f *FedoraInstaller) CheckKeepalived() (bool, error) {
 }
 
 func (f *FedoraInstaller) InstallKeepalived() error {
-	rpmPath := fmt.Sprintf("%s/keepalived/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
+	rpmPath := fmt.Sprintf("%s/ha/keepalived/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
 	_, err := f.Ctx.RunCmd(fmt.Sprintf("sudo dnf install -y %s --disablerepo=\"*\" --nogpgcheck", rpmPath))
 	return err
 }
