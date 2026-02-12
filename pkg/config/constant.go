@@ -27,7 +27,8 @@ const (
 	DefaultPauseImage = "pause:3.10.1"
 
 	DefaultKubeOvnChart             = "kube-ovn-v1.15.2.tgz"
-	DefaultHamiChart                = "hami-2.8.0.tgz"
+	DefaultHamiChart                = "hami-2.7.1.tgz"
+	DefaultHamiWebUIChart           = "hami-webui-1.0.5.tgz"
 	DefaultKubePrometheusStackChart = "kube-prometheus-stack-81.6.0.tgz"
 	DefaultMultusImage              = "multus-cni:snapshot-thick"
 )

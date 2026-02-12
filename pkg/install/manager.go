@@ -126,6 +126,8 @@ echo "${name}|${version}|${kernel}|${gpu}"
 		m.installer = &strategy.FedoraInstaller{Ctx: m.context}
 	} else if strings.Contains(osInfo, "ubuntu") || strings.Contains(osInfo, "debian") {
 		m.installer = &strategy.UbuntuInstaller{Ctx: m.context}
+	} else if strings.Contains(osInfo, "openeuler") {
+		m.installer = &strategy.OpenEulerInstaller{Ctx: m.context}
 	} else {
 		return fmt.Errorf("unsupported OS: %s", osInfo)
 	}
@@ -623,6 +625,20 @@ func (m *Manager) addonSteps() []runner.Step {
 			Action: m.deployMultusCNI,
 		},
 		{
+			Name: "部署 kube-prometheus-stack",
+			Check: func() (bool, error) {
+				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.KubePrometheus.Enabled {
+					return true, nil
+				}
+				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^kube-prometheus-stack$' || true")
+				if err != nil {
+					return false, err
+				}
+				return strings.TrimSpace(out) == "kube-prometheus-stack", nil
+			},
+			Action: m.deployKubePrometheusStack,
+		},
+		{
 			Name: "部署 HAMI",
 			Check: func() (bool, error) {
 				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.Hami.Enabled {
@@ -637,18 +653,18 @@ func (m *Manager) addonSteps() []runner.Step {
 			Action: m.deployHami,
 		},
 		{
-			Name: "部署 kube-prometheus-stack",
+			Name: "部署 HAMI-WebUI",
 			Check: func() (bool, error) {
-				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.KubePrometheus.Enabled {
+				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.Hami.Enabled {
 					return true, nil
 				}
-				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^kube-prometheus-stack$' || true")
+				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami$' || true")
 				if err != nil {
 					return false, err
 				}
-				return strings.TrimSpace(out) == "kube-prometheus-stack", nil
+				return strings.TrimSpace(out) == "hami", nil
 			},
-			Action: m.deployKubePrometheusStack,
+			Action: m.deployHamiWebUI,
 		},
 	}
 }
@@ -707,12 +723,16 @@ func (m *Manager) deployMultusCNI() error {
 	return err
 }
 
+func (m *Manager) deployKubePrometheusStack() error {
+	return m.deployHelmAddon("kube-prometheus-stack", "kube-prometheus-stack-images", "kube-prometheus-stack", config.DefaultKubePrometheusStackChart, "monitoring")
+}
+
 func (m *Manager) deployHami() error {
 	return m.deployHelmAddon("hami", "hami-images", path.Join("hami", "hami"), config.DefaultHamiChart, "kube-system")
 }
 
-func (m *Manager) deployKubePrometheusStack() error {
-	return m.deployHelmAddon("kube-prometheus-stack", "kube-prometheus-stack-images", "kube-prometheus-stack", config.DefaultKubePrometheusStackChart, "monitoring")
+func (m *Manager) deployHamiWebUI() error {
+	return m.deployHelmAddon("hami-webui", "hami-webui-images", path.Join("hami", "hami-webui"), config.DefaultHamiWebUIChart, "kube-system")
 }
 
 func (m *Manager) checkHelmInstalled() (bool, error) {

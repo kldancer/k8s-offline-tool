@@ -61,6 +61,77 @@ func CheckDockerCEPackage(ctx *Context) (bool, error) {
 		strings.Contains(runcOut, ctx.Cfg.Versions.Runc), nil
 }
 
+func InstallDockerCEBinary(ctx *Context) error {
+	vDocker := strings.ReplaceAll(ctx.Cfg.Versions.DockerCE, ".", "-")
+	vContainerd := strings.ReplaceAll(ctx.Cfg.Versions.Containerd, ".", "-")
+	vRunc := strings.ReplaceAll(ctx.Cfg.Versions.Runc, ".", "-")
+
+	// 1. Install Docker
+	// Path: docker/arm64/29-2-0/docker-29.2.0.tgz
+	dockerTar := fmt.Sprintf("%s/docker/%s/%s/docker-%s.tgz", ctx.RemoteTmpDir, ctx.Arch, vDocker, ctx.Cfg.Versions.DockerCE)
+	ctx.RunCmd(fmt.Sprintf("tar -xzf %s -C /usr/local/src", dockerTar))
+	ctx.RunCmd("cp -f /usr/local/src/docker/* /usr/local/bin/")
+
+	// 2. Install Containerd
+	// Path: containerd/arm64/2-2-1/containerd-2.2.1-linux-arm64.tar.gz
+	containerdTar := fmt.Sprintf("%s/containerd/%s/%s/containerd-%s-linux-%s.tar.gz", ctx.RemoteTmpDir, ctx.Arch, vContainerd, ctx.Cfg.Versions.Containerd, ctx.Arch)
+	ctx.RunCmd(fmt.Sprintf("tar -C /usr/local -xzf %s", containerdTar))
+
+	// 3. Install Runc
+	// Path: runc/arm64/1-3-4/runc.arm64
+	runcBin := fmt.Sprintf("%s/runc/%s/%s/runc.%s", ctx.RemoteTmpDir, ctx.Arch, vRunc, ctx.Arch)
+	ctx.RunCmd(fmt.Sprintf("install -m 755 %s /usr/local/sbin/runc", runcBin))
+
+	// 4. Create necessary directories
+	ctx.RunCmd("mkdir -p /etc/docker /var/lib/docker /run/containerd")
+
+	// 5. Create systemd units
+	dockerService := `[Unit]
+Description=Docker Application Container Engine
+Documentation=https://docs.docker.com
+After=network-online.target containerd.service
+Requires=containerd.service
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/dockerd --containerd=/run/containerd/containerd.sock
+Restart=always
+RestartSec=5
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+Delegate=yes
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
+`
+	containerdService := `[Unit]
+Description=containerd container runtime
+Documentation=https://containerd.io
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/containerd
+Restart=always
+RestartSec=5
+Delegate=yes
+KillMode=process
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target
+`
+	ctx.RunCmd(fmt.Sprintf("cat > /etc/systemd/system/docker.service <<EOF\n%s\nEOF", dockerService))
+	ctx.RunCmd(fmt.Sprintf("cat > /etc/systemd/system/containerd.service <<EOF\n%s\nEOF", containerdService))
+
+	// 6. Reload
+	ctx.RunCmd("systemctl daemon-reload")
+	return nil
+}
+
 func CheckContainerdRunning(ctx *Context) (bool, error) {
 	out, _ := ctx.RunCmd("systemctl is-active containerd")
 	return strings.TrimSpace(out) == "active", nil
@@ -76,7 +147,8 @@ func ConfigureAndStartContainerd(ctx *Context) error {
 
 	// 3. 启动服务
 	ctx.RunCmd("systemctl daemon-reload")
-	_, err := ctx.RunCmd("systemctl enable --now containerd || true")
+	ctx.RunCmd("systemctl enable --now containerd || true")
+	_, err := ctx.RunCmd("systemctl enable --now docker || true")
 	return err
 }
 

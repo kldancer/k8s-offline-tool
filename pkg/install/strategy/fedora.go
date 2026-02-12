@@ -91,9 +91,7 @@ func (f *FedoraInstaller) CheckDockerCEPackage() (bool, error) {
 	return CheckDockerCEPackage(f.Ctx)
 }
 func (f *FedoraInstaller) InstallDockerCEPackage() error {
-	rpmPath := fmt.Sprintf("%s/docker-ce/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
-	_, err := f.Ctx.RunCmd(fmt.Sprintf("sudo dnf install -y %s --disablerepo=\"*\" --nogpgcheck", rpmPath))
-	return err
+	return InstallDockerCEBinary(f.Ctx)
 }
 
 func (f *FedoraInstaller) CheckContainerdRunning() (bool, error) {
