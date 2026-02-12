@@ -414,8 +414,7 @@ func (m *Manager) Run(dryRun bool) error {
 		)
 	}
 
-	if (m.nodeCfg.IsMaster && !m.globalCfg.HA.Enabled) ||
-		(m.nodeCfg.IsPrimaryMaster && m.globalCfg.HA.Enabled) {
+	if m.shouldDeployAddonsOnNode() {
 		steps = append(steps, m.addonSteps()...)
 	}
 
@@ -425,6 +424,14 @@ func (m *Manager) Run(dryRun bool) error {
 
 func (m *Manager) shouldConfigureLoadBalancer() bool {
 	return m.globalCfg.HA.Enabled && m.nodeCfg.IsMaster
+}
+
+func (m *Manager) shouldDeployAddonsOnNode() bool {
+	if m.globalCfg.InstallMode == config.InstallModeInstallOnly {
+		return false
+	}
+	return (m.nodeCfg.IsMaster && !m.globalCfg.HA.Enabled) ||
+		(m.nodeCfg.IsPrimaryMaster && m.globalCfg.HA.Enabled)
 }
 
 func (m *Manager) isPrimaryMaster() bool {
