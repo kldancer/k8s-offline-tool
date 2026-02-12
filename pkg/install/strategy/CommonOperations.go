@@ -97,7 +97,7 @@ func ConfiguraRegistryContainerd(ctx *Context) error {
 	regDomain := ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", ctx.Cfg.Registry.Port)
 
 	// 1.3 修改 sandbox镜像
-	c := fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%%s/google_containers/%%s'|g\" /etc/containerd/config.toml", regDomain, config.DefaultPauseImage)
+	c := fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%s/google_containers/%s'|g\" /etc/containerd/config.toml", regDomain, config.DefaultPauseImage)
 	ctx.RunCmd(c)
 
 	// 1.4 添加域名解析配置
