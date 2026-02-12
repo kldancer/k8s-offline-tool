@@ -132,32 +132,3 @@ func (c *Client) WriteFile(remotePath string, src io.Reader) error {
 	f.Chmod(0755)
 	return nil
 }
-
-// WriteFile 将内存数据直接写入远程文件
-func (c *Client) WriteFile2(remotePath string, data []byte) error {
-	// 1. 强制转换为正斜杠 (处理 Windows 上可能的输入: "dir\file")
-	remotePath = filepath.ToSlash(remotePath)
-
-	// 2. 使用 path 包获取目录 (path 包始终使用 '/'，而 filepath.Dir 在 Windows 上会返回 '\')
-	dir := path.Dir(remotePath)
-
-	// 3. 确保父目录存在 (Linux 命令)
-	command, err := c.RunCommand(fmt.Sprintf("mkdir -p %s", dir))
-	if err != nil {
-		return fmt.Errorf("mkdir -p %s command failed: %v (output: %s)", dir, err, command)
-	}
-
-	// 4. SFTP 创建文件
-	f, err := c.sftp.Create(remotePath)
-	if err != nil {
-		return fmt.Errorf("sftp create file %s failed: %v", remotePath, err)
-	}
-	defer f.Close()
-
-	if _, err := f.Write(data); err != nil {
-		return fmt.Errorf("write file failed: %v", err)
-	}
-
-	f.Chmod(0755)
-	return nil
-}

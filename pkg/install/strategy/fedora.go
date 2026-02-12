@@ -54,11 +54,8 @@ func (f *FedoraInstaller) ConfigureSysctl() error {
 
 // --- Tools ---
 func (f *FedoraInstaller) CheckCommonTools() (bool, error) {
-	//if _, err := f.Ctx.RunCmd("rpm -q htop"); err != nil {
-	//	return false, nil
-	//}
-	// 暂时默认重新装一遍就行
-	return false, nil
+	out, err := f.Ctx.RunCmd("rpm -q htop")
+	return err == nil && !strings.Contains(out, "not installed"), nil
 }
 func (f *FedoraInstaller) InstallCommonTools() error {
 	rpmPath := fmt.Sprintf("%s/common-tools/%s/rpm/*.rpm", f.Ctx.RemoteTmpDir, f.Ctx.Arch)
@@ -150,8 +147,11 @@ func (f *FedoraInstaller) ConfigureGPU() error {
 
 // --- K8s ---
 func (f *FedoraInstaller) CheckK8sComponents() (bool, error) {
-	// 暂时不检查，直接覆盖安装
-	return false, nil
+	out, err := f.Ctx.RunCmd("kubeadm version -o short")
+	if err != nil {
+		return false, nil
+	}
+	return strings.Contains(out, f.Ctx.Cfg.Versions.K8s), nil
 }
 func (f *FedoraInstaller) InstallK8sComponents() error {
 	vFolder := f.verPath(f.Ctx.Cfg.Versions.K8s)

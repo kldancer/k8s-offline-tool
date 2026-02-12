@@ -32,8 +32,6 @@ type Manager struct {
 	totalNodes int
 }
 
-var hasMirrorSync = false
-
 // NewManager 创建针对特定节点的管理器
 func NewManager(globalCfg *config.Config, nodeCfg *config.NodeConfig, nodeIndex int, totalNodes int, output io.Writer) (*Manager, error) {
 	if output == nil {
@@ -68,44 +66,38 @@ func (m *Manager) Close() {
 }
 
 func (m *Manager) detectEnv() error {
-
 	arch, err := m.client.DetectArch()
 	if err != nil {
 		return fmt.Errorf("failed to detect arch: %v", err)
 	}
 
-	// 获取系统名称
-	systemName := "unknown"
-	if verOut, err := m.client.RunCommand("grep '^NAME=' /etc/os-release | cut -d= -f2 | sed 's/\"//g'"); err == nil {
-		ver := strings.TrimSpace(verOut)
-		if ver != "" {
-			systemName = ver
-		}
-	}
-
-	// 获取系统版本
-	systemVersion := "unknown"
-	if verOut, err := m.client.RunCommand("grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | sed 's/\"//g'"); err == nil {
-		ver := strings.TrimSpace(verOut)
-		if ver != "" {
-			systemVersion = ver
-		}
-	}
-
-	// 获取内核版本
-	kernelVersion, err := m.client.RunCommand("uname -r")
+	// 合并探测命令以减少 RTT
+	// 输出格式: NAME|VERSION_ID|KERNEL|HAS_GPU
+	probeCmd := `
+name=$(grep '^NAME=' /etc/os-release | cut -d= -f2 | sed 's/"//g')
+version=$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | sed 's/"//g')
+kernel=$(uname -r)
+gpu="false"
+if lspci | grep -i nvidia >/dev/null 2>&1; then gpu="true"; fi
+echo "${name}|${version}|${kernel}|${gpu}"
+`
+	out, err := m.client.RunCommand(strings.TrimSpace(probeCmd))
 	if err != nil {
-		return fmt.Errorf("failed to detect kernel version: %v", err)
+		return fmt.Errorf("failed to probe environment: %v", err)
 	}
-	kernelVersion = strings.TrimSpace(kernelVersion)
 
-	hasGPU := false
-	if gpuOut, _ := m.client.RunCommand("lspci | grep -i nvidia"); gpuOut != "" {
-		hasGPU = true
+	parts := strings.Split(strings.TrimSpace(out), "|")
+	if len(parts) != 4 {
+		return fmt.Errorf("unexpected probe output: %s", out)
 	}
+
+	systemName := parts[0]
+	systemVersion := parts[1]
+	kernelVersion := parts[2]
+	hasGPU := parts[3] == "true"
 
 	m.context = &strategy.Context{
-		Cfg:           m.globalCfg, // 注意：Context 中传递 Global 配置用于获取 Registry/Versions
+		Cfg:           m.globalCfg,
 		Arch:          arch,
 		SystemName:    systemName,
 		SystemVersion: systemVersion,
@@ -161,8 +153,12 @@ func (m *Manager) distributeResources() error {
 		return false
 	}
 
-	// 1. 统计总数
-	totalFiles := 0
+	type fileItem struct {
+		relPath   string
+		slashPath string
+	}
+	var files []fileItem
+
 	err = fs.WalkDir(fsys, ".", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -174,77 +170,58 @@ func (m *Manager) distributeResources() error {
 			return nil
 		}
 		if !d.IsDir() {
-			totalFiles++
+			files = append(files, fileItem{
+				relPath:   path,
+				slashPath: filepath.ToSlash(path),
+			})
 		}
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to count files: %v", err)
+		return fmt.Errorf("failed to scan files: %v", err)
 	}
 
-	// 2. 执行上传
-	current := 0
+	totalFiles := len(files)
+	if totalFiles == 0 {
+		return nil
+	}
+
 	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
-
-	return fs.WalkDir(fsys, ".", func(relPath string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		slashPath := filepath.ToSlash(relPath)
-		if shouldSkip(relPath, d.IsDir()) {
-			if d.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if d.IsDir() {
-			return nil
-		}
-
-		// --- 打印“开始上传” ---
-		current++
-		fileName := path.Base(slashPath)
+	for i, file := range files {
+		current := i + 1
+		fileName := path.Base(file.slashPath)
 		if len(fileName) > 25 {
 			fileName = fileName[:22] + "..."
 		}
 
-		// 计算进度条
 		percent := float64(current) / float64(totalFiles) * 100
 		const barWidth = 20
 		filled := int(float64(barWidth) * float64(current) / float64(totalFiles))
-		if filled > barWidth {
-			filled = barWidth
-		}
 		bar := strings.Repeat("=", filled) + strings.Repeat(" ", barWidth-filled)
 		if filled > 0 && filled < barWidth {
 			bar = strings.Repeat("=", filled-1) + ">" + strings.Repeat(" ", barWidth-filled)
 		}
 
-		// 关键点：在 WriteFile 之前打印，让用户知道正在传这个文件
 		fmt.Fprintf(m.output, "\r%s  └─ Syncing: [%s] %3.0f%% (%d/%d) %-25s", prefix, bar, percent, current, totalFiles, fileName)
 
-		// --- 开始流式传输 ---
-		// 使用 Open 打开流，而不是 ReadFile 读入内存
-		f, err := fsys.Open(relPath)
+		f, err := fsys.Open(file.relPath)
 		if err != nil {
 			return err
 		}
-		defer f.Close()
 
-		remotePath := path.Join(m.context.RemoteTmpDir, slashPath)
-
-		// 调用新版的 WriteFile (传入 io.Reader)
+		remotePath := path.Join(m.context.RemoteTmpDir, file.slashPath)
 		if err := m.client.WriteFile(remotePath, f); err != nil {
+			f.Close()
 			return fmt.Errorf("upload %s failed: %v", fileName, err)
 		}
+		f.Close()
 
 		if current == totalFiles {
 			fmt.Fprint(m.output, "\n")
 		}
+	}
 
-		return nil
-	})
+	return nil
 }
 
 func (m *Manager) Run(dryRun bool) error {
@@ -734,18 +711,26 @@ func (m *Manager) ensureAdminConf() error {
 	return nil
 }
 
-func (m *Manager) deployKubeOvn() error {
+func (m *Manager) deployHelmAddon(name, groupKey, relativePath, chartName, namespace string) error {
 	if err := m.ensureAdminConf(); err != nil {
 		return err
 	}
-	chartPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "cni", "kube-ovn", "kube-ovn-v1.15.2.tgz")
-	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "cni", "kube-ovn", "values.yaml")
-	if err := m.rewriteHelmValuesFile("kube-ovn-images", valuesPath); err != nil {
+	chartPath := path.Join(m.context.RemoteTmpDir, "helm-resource", relativePath, chartName)
+	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", relativePath, "values.yaml")
+	if err := m.rewriteHelmValuesFile(groupKey, valuesPath); err != nil {
 		return err
 	}
-	cmd := fmt.Sprintf("helm install kube-ovn %s -n kube-system -f %s", chartPath, valuesPath)
+	cmd := fmt.Sprintf("helm install %s %s -n %s -f %s --create-namespace", name, chartPath, namespace, valuesPath)
 	_, err := m.context.RunCmd(cmd)
 	return err
+}
+
+func (m *Manager) deployKubeOvn() error {
+	_, err := m.context.RunCmd("kubectl label node -l beta.kubernetes.io/os=linux kubernetes.io/os=linux --overwrite > /dev/null 2>&1 && kubectl label node -l node-role.kubernetes.io/control-plane kube-ovn/role=master --overwrite > /dev/null 2>&1")
+	if err != nil {
+		return err
+	}
+	return m.deployHelmAddon("kube-ovn", "kube-ovn-images", path.Join("cni", "kube-ovn"), config.DefaultKubeOvnChart, "kube-system")
 }
 
 func (m *Manager) deployMultusCNI() error {
@@ -754,7 +739,7 @@ func (m *Manager) deployMultusCNI() error {
 	}
 	manifestPath := path.Join(m.context.RemoteTmpDir, "cni", "multus-cni", "multus-daemonset-thick.yml")
 	if registryHost, ok := m.registryHost(); ok {
-		image := registryHost + "/k8snetworkplumbingwg/multus-cni:snapshot-thick"
+		image := registryHost + "/" + config.DefaultMultusImage
 		cmd := fmt.Sprintf("sed -i 's|ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick|%s|g' %s", image, manifestPath)
 		if _, err := m.context.RunCmd(cmd); err != nil {
 			return err
@@ -766,31 +751,11 @@ func (m *Manager) deployMultusCNI() error {
 }
 
 func (m *Manager) deployHami() error {
-	if err := m.ensureAdminConf(); err != nil {
-		return err
-	}
-	chartPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "hami", "hami-2.8.0.tgz")
-	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "hami", "values.yaml")
-	if err := m.rewriteHelmValuesFile("hami-images", valuesPath); err != nil {
-		return err
-	}
-	cmd := fmt.Sprintf("helm install hami %s -n kube-system -f %s", chartPath, valuesPath)
-	_, err := m.context.RunCmd(cmd)
-	return err
+	return m.deployHelmAddon("hami", "hami-images", path.Join("hami", "hami"), config.DefaultHamiChart, "kube-system")
 }
 
 func (m *Manager) deployKubePrometheusStack() error {
-	if err := m.ensureAdminConf(); err != nil {
-		return err
-	}
-	chartPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "kube-prometheus-stack", "kube-prometheus-stack-81.6.0.tgz")
-	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "kube-prometheus-stack", "values.yaml")
-	if err := m.rewriteHelmValuesFile("kube-prometheus-stack-images", valuesPath); err != nil {
-		return err
-	}
-	cmd := fmt.Sprintf("helm install kube-prometheus-stack %s -n kube-system -f %s", chartPath, valuesPath)
-	_, err := m.context.RunCmd(cmd)
-	return err
+	return m.deployHelmAddon("kube-prometheus-stack", "kube-prometheus-stack-images", "kube-prometheus-stack", config.DefaultKubePrometheusStackChart, "monitoring")
 }
 
 func (m *Manager) checkHelmInstalled() (bool, error) {
@@ -852,14 +817,16 @@ func (m *Manager) rewriteHelmValuesFile(groupKey, valuesPath string) error {
 }
 
 func (m *Manager) shouldIncludeAddonPath(p string, isDir bool) bool {
-	if m.globalCfg.InstallMode == config.InstallModeAddonsOnly {
-		if !m.isAddonPath(p) {
+	// 只有主 Master 节点才同步 Addon 资源
+	if m.isAddonPath(p) {
+		if !m.isPrimaryExecutionNode() {
 			return false
 		}
 		return m.isAddonPathEnabled(p, isDir)
 	}
-	if m.isAddonPath(p) {
-		return m.isAddonPathEnabled(p, isDir)
+
+	if m.globalCfg.InstallMode == config.InstallModeAddonsOnly {
+		return false
 	}
 	return true
 }
@@ -877,7 +844,6 @@ func (m *Manager) shouldIncludeLoadBalancerPath() bool {
 
 func (m *Manager) isAddonPath(p string) bool {
 	return p == "cni" ||
-		strings.HasPrefix(p, "cni/kube-ovn") ||
 		strings.HasPrefix(p, "cni/multus-cni") ||
 		p == "helm-resource" ||
 		strings.HasPrefix(p, "helm-resource/")
@@ -886,9 +852,6 @@ func (m *Manager) isAddonPath(p string) bool {
 func (m *Manager) isAddonPathEnabled(p string, isDir bool) bool {
 	if p == "cni" {
 		return m.globalCfg.Addons.KubeOvn.Enabled || m.globalCfg.Addons.MultusCNI.Enabled
-	}
-	if strings.HasPrefix(p, "cni/kube-ovn") {
-		return m.globalCfg.Addons.KubeOvn.Enabled
 	}
 	if strings.HasPrefix(p, "cni/multus-cni") {
 		return m.globalCfg.Addons.MultusCNI.Enabled

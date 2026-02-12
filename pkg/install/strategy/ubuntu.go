@@ -47,11 +47,9 @@ func (u *UbuntuInstaller) ConfigureSysctl() error {
 
 // --- Tools ---
 func (u *UbuntuInstaller) CheckCommonTools() (bool, error) {
-	//if _, err := u.Ctx.RunCmd("dpkg -s htop"); err != nil {
-	//	return false, nil
-	//}
-	// 暂时默认重新装一遍就行
-	return false, nil
+	// 检查一个代表性工具即可
+	out, err := u.Ctx.RunCmd("dpkg -l tree")
+	return err == nil && strings.Contains(out, "ii"), nil
 }
 func (u *UbuntuInstaller) InstallCommonTools() error {
 	debPath := fmt.Sprintf("%s/common-tools/%s/apt/*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
@@ -148,8 +146,11 @@ func (u *UbuntuInstaller) ConfigureGPU() error {
 
 // --- K8s ---
 func (u *UbuntuInstaller) CheckK8sComponents() (bool, error) {
-	// 暂时不检查，直接覆盖安装
-	return false, nil
+	out, err := u.Ctx.RunCmd("kubeadm version -o short")
+	if err != nil {
+		return false, nil
+	}
+	return strings.Contains(out, u.Ctx.Cfg.Versions.K8s), nil
 }
 func (u *UbuntuInstaller) InstallK8sComponents() error {
 	vFolder := u.verPath(u.Ctx.Cfg.Versions.K8s)
