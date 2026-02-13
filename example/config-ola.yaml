@@ -1,0 +1,40 @@
+install_mode: "full"
+resource_package: "example/resources-openEuler-arm64.tar.gz"
+
+# 组件部署配置（默认不启用）
+addons:
+  kube_ovn:
+    enabled: false
+  multus_cni:
+    enabled: false
+  hami:
+    enabled: false
+  kube_prometheus_stack:
+    enabled: false
+
+# 仅执行预检查，不执行安装动作
+dry_run: false
+
+# 私有仓库配置
+registry:
+  endpoint: "jusuan.io"
+  port: 8080
+  ip: 10.10.10.250
+  username: "admin"
+  password: "Harbor12345"
+
+# 节点列表（按顺序进行安装）
+nodes:
+  - ip: "10.10.10.227"
+    password: "root"
+    ssh_port: 22
+    is_master: true
+  - ip: "10.10.10.146"
+    password: "root"
+    ssh_port: 22
+  - ip: "10.10.10.170"
+    password: "root"
+    ssh_port: 22
+
+# Worker 节点加入集群的命令 (在 is_master: false 的节点上执行)
+join_command: ""

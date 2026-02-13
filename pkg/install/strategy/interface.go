@@ -43,9 +43,9 @@ type NodeInstaller interface {
 	CheckNerdctl() (bool, error)
 	InstallNerdctl() error
 
-	// GPU
-	CheckGPUConfig() (bool, error)
-	ConfigureGPU() error
+	// Accelerators
+	CheckAcceleratorConfig() (bool, error)
+	ConfigureAccelerator() error
 
 	// K8s
 	CheckK8sComponents() (bool, error)
@@ -59,6 +59,7 @@ type Context struct {
 	SystemVersion string
 	KernelVersion string
 	HasGPU        bool
+	HasNPU        bool
 	RemoteTmpDir  string
 	RunCmd        func(string) (string, error)
 }

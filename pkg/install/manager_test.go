@@ -6,22 +6,13 @@ import (
 	"k8s-offline-tool/pkg/config"
 )
 
-func TestShouldDeployAddonsOnNode(t *testing.T) {
+func TestIsPrimaryExecutionNode(t *testing.T) {
 	tests := []struct {
 		name string
 		cfg  config.Config
 		node config.NodeConfig
 		want bool
 	}{
-		{
-			name: "install-only mode should skip addons",
-			cfg: config.Config{
-				InstallMode: config.InstallModeInstallOnly,
-				HA:          config.HAConfig{Enabled: false},
-			},
-			node: config.NodeConfig{IsMaster: true},
-			want: false,
-		},
 		{
 			name: "non-HA master deploys addons",
 			cfg: config.Config{
@@ -57,9 +48,9 @@ func TestShouldDeployAddonsOnNode(t *testing.T) {
 				globalCfg: &tt.cfg,
 				nodeCfg:   &tt.node,
 			}
-			got := mgr.shouldDeployAddonsOnNode()
+			got := mgr.isPrimaryExecutionNode()
 			if got != tt.want {
-				t.Fatalf("shouldDeployAddonsOnNode()=%v, want %v", got, tt.want)
+				t.Fatalf("isPrimaryExecutionNode()=%v, want %v", got, tt.want)
 			}
 		})
 	}

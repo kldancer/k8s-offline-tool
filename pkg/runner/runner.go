@@ -14,12 +14,15 @@ type Step struct {
 }
 
 func RunPipeline(steps []Step, prefix string, output io.Writer, dryRun bool) error {
+	start := time.Now()
+	var err error
 	for _, step := range steps {
-		if err := runStep(step, prefix, output, dryRun); err != nil {
-			return err
+		if err = runStep(step, prefix, output, dryRun); err != nil {
+			break
 		}
 	}
-	return nil
+	ui.PrintPipelineSummary(output, prefix, time.Since(start), err == nil)
+	return err
 }
 
 func runStep(step Step, prefix string, output io.Writer, dryRun bool) error {
@@ -37,7 +40,7 @@ func runStep(step Step, prefix string, output io.Writer, dryRun bool) error {
 	}
 
 	if ok {
-		ui.PrintSkipped(output)
+		ui.PrintSkipped(output, time.Since(start))
 		return nil
 	}
 	ui.PrintToExecute(output)

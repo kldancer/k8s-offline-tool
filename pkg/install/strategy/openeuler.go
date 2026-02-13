@@ -43,24 +43,40 @@ func (o *OpenEulerInstaller) CheckKernelModules() (bool, error) {
 	return CheckKernelModules(o.Ctx)
 }
 func (o *OpenEulerInstaller) LoadKernelModules() error {
-	return LoadKernelModules(o.Ctx)
+	if err := LoadKernelModules(o.Ctx); err != nil {
+		return err
+	}
+	return o.ConfigureSysctl()
 }
 func (o *OpenEulerInstaller) CheckSysctl() (bool, error) {
-	return CheckSysctl(o.Ctx)
+	commonOK, err := CheckSysctl(o.Ctx)
+	if err != nil || !commonOK {
+		return commonOK, err
+	}
+
+	_, err = o.Ctx.RunCmd("cat /etc/sysctl.d/99-sysctl.conf | grep net.ipv4.ip_forward=1")
+	return err == nil, nil
 }
 func (o *OpenEulerInstaller) ConfigureSysctl() error {
-	return ConfigureSysctl(o.Ctx)
+	if err := ConfigureSysctl(o.Ctx); err != nil {
+		return err
+	}
+
+	cmd := `sed -ri '/^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=/d' /etc/sysctl.d/99-sysctl.conf &&
+echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.d/99-sysctl.conf &&
+sysctl --system`
+	_, err := o.Ctx.RunCmd(cmd)
+	return err
 }
 
 // --- Tools ---
 func (o *OpenEulerInstaller) CheckCommonTools() (bool, error) {
-	out, err := o.Ctx.RunCmd("rpm -q htop")
-	return err == nil && !strings.Contains(out, "not installed"), nil
+	// 欧拉系统暂时无需安装额外的工具
+	return true, nil
 }
 func (o *OpenEulerInstaller) InstallCommonTools() error {
-	rpmPath := fmt.Sprintf("%s/common-tools/%s/rpm/*.rpm", o.Ctx.RemoteTmpDir, o.Ctx.Arch)
-	_, err := o.Ctx.RunCmd(fmt.Sprintf("sudo dnf install -y %s --disablerepo=\"*\" --nogpgcheck", rpmPath))
-	return err
+	// 欧拉系统暂时无需安装额外的工具
+	return nil
 }
 
 // --- Load Balancer ---
@@ -127,16 +143,35 @@ func (o *OpenEulerInstaller) InstallNerdctl() error {
 	return InstallNerdctl(o.Ctx, vFolder)
 }
 
-// --- GPU ---
-func (o *OpenEulerInstaller) CheckGPUConfig() (bool, error) {
-	return CheckGPUConfig(o.Ctx)
+// --- Accelerators ---
+func (o *OpenEulerInstaller) CheckAcceleratorConfig() (bool, error) {
+	return CheckAcceleratorConfig(o.Ctx)
 }
 
-func (o *OpenEulerInstaller) ConfigureGPU() error {
-	rpmPath := fmt.Sprintf("%s/common-tools/%s/rpm/nvidia-container-toolkit*.rpm", o.Ctx.RemoteTmpDir, o.Ctx.Arch)
-	o.Ctx.RunCmd(fmt.Sprintf("rpm -Uvh %s --nodeps --force", rpmPath))
-	o.Ctx.RunCmd("nvidia-ctk runtime configure --runtime=containerd")
-	o.Ctx.RunCmd("systemctl restart containerd")
+func (o *OpenEulerInstaller) ConfigureAccelerator() error {
+	if o.Ctx.HasGPU {
+		rpmPath := fmt.Sprintf("%s/common-tools/%s/rpm/nvidia-container-toolkit*.rpm", o.Ctx.RemoteTmpDir, o.Ctx.Arch)
+		o.Ctx.RunCmd(fmt.Sprintf("rpm -Uvh %s --nodeps --force", rpmPath))
+		o.Ctx.RunCmd("nvidia-ctk runtime configure --runtime=containerd")
+		// default_runtime_name 改为 nvidia
+		o.Ctx.RunCmd("sed -i 's/^\\([[:space:]]*default_runtime_name[[:space:]]*=[[:space:]]*\\)\"runc\"/\\1\"nvidia\"/' /etc/containerd/conf.d/99-nvidia.toml")
+		o.Ctx.RunCmd("systemctl restart containerd")
+	}
+
+	if o.Ctx.HasNPU {
+		runtimeDir := fmt.Sprintf("%s/docker-runtime/ascend/%s", o.Ctx.RemoteTmpDir, o.Ctx.Arch)
+		installCmd := fmt.Sprintf("cd %s && ./*.run --install", runtimeDir)
+		if _, err := o.Ctx.RunCmd(installCmd); err != nil {
+			return fmt.Errorf("failed to install ascend docker runtime: %v", err)
+		}
+
+		out, err := o.Ctx.RunCmd("cat /etc/containerd/config.toml | grep ascend-docker-runtime")
+		if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
+			return fmt.Errorf("failed to verify ascend docker runtime installation: %v", err)
+		}
+		o.Ctx.RunCmd("systemctl restart containerd")
+	}
+
 	return nil
 }
 

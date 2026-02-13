@@ -1,6 +1,7 @@
 package strategy
 
 import (
+	"encoding/base64"
 	"fmt"
 	"k8s-offline-tool/pkg/config"
 	"strings"
@@ -44,11 +45,11 @@ EOF`)
 
 // --- Containerd Granular ---
 func CheckDockerCEPackage(ctx *Context) (bool, error) {
-	dockerOut, err := ctx.RunCmd("docker --version")
+	containerdOut, err := ctx.RunCmd("containerd --version")
 	if err != nil {
 		return false, nil
 	}
-	containerdOut, err := ctx.RunCmd("containerd --version")
+	dockerOut, err := ctx.RunCmd("docker --version")
 	if err != nil {
 		return false, nil
 	}
@@ -67,19 +68,19 @@ func InstallDockerCEBinary(ctx *Context) error {
 	vRunc := strings.ReplaceAll(ctx.Cfg.Versions.Runc, ".", "-")
 
 	// 1. Install Docker
-	// Path: docker/arm64/29-2-0/docker-29.2.0.tgz
-	dockerTar := fmt.Sprintf("%s/docker/%s/%s/docker-%s.tgz", ctx.RemoteTmpDir, ctx.Arch, vDocker, ctx.Cfg.Versions.DockerCE)
+	// Path: docker-ce/docker/arm64/29-2-0/docker-29.2.0.tgz
+	dockerTar := fmt.Sprintf("%s/docker-ce/docker/%s/%s/docker-%s.tgz", ctx.RemoteTmpDir, ctx.Arch, vDocker, ctx.Cfg.Versions.DockerCE)
 	ctx.RunCmd(fmt.Sprintf("tar -xzf %s -C /usr/local/src", dockerTar))
 	ctx.RunCmd("cp -f /usr/local/src/docker/* /usr/local/bin/")
 
 	// 2. Install Containerd
-	// Path: containerd/arm64/2-2-1/containerd-2.2.1-linux-arm64.tar.gz
-	containerdTar := fmt.Sprintf("%s/containerd/%s/%s/containerd-%s-linux-%s.tar.gz", ctx.RemoteTmpDir, ctx.Arch, vContainerd, ctx.Cfg.Versions.Containerd, ctx.Arch)
+	// Path: docker-ce/containerd/arm64/2-2-1/containerd-2.2.1-linux-arm64.tar.gz
+	containerdTar := fmt.Sprintf("%s/docker-ce/containerd/%s/%s/containerd-%s-linux-%s.tar.gz", ctx.RemoteTmpDir, ctx.Arch, vContainerd, ctx.Cfg.Versions.Containerd, ctx.Arch)
 	ctx.RunCmd(fmt.Sprintf("tar -C /usr/local -xzf %s", containerdTar))
 
 	// 3. Install Runc
-	// Path: runc/arm64/1-3-4/runc.arm64
-	runcBin := fmt.Sprintf("%s/runc/%s/%s/runc.%s", ctx.RemoteTmpDir, ctx.Arch, vRunc, ctx.Arch)
+	// Path: docker-ce/runc/arm64/1-3-4/runc.arm64
+	runcBin := fmt.Sprintf("%s/docker-ce/runc/%s/%s/runc.%s", ctx.RemoteTmpDir, ctx.Arch, vRunc, ctx.Arch)
 	ctx.RunCmd(fmt.Sprintf("install -m 755 %s /usr/local/sbin/runc", runcBin))
 
 	// 4. Create necessary directories
@@ -148,8 +149,8 @@ func ConfigureAndStartContainerd(ctx *Context) error {
 	// 3. 启动服务
 	ctx.RunCmd("systemctl daemon-reload")
 	ctx.RunCmd("systemctl enable --now containerd || true")
-	_, err := ctx.RunCmd("systemctl enable --now docker || true")
-	return err
+	//_, err := ctx.RunCmd("systemctl enable --now docker || true")
+	return nil
 }
 
 func CheckConfiguraRegistryContainerd(ctx *Context) (bool, error) {
@@ -176,6 +177,7 @@ func ConfiguraRegistryContainerd(ctx *Context) error {
 	ctx.RunCmd(fmt.Sprintf(" echo \"%s %s\" | sudo tee -a /etc/hosts", ctx.Cfg.Registry.IP, ctx.Cfg.Registry.Endpoint))
 
 	regUrl := "http://" + regDomain
+	regAuth := base64.StdEncoding.EncodeToString([]byte(ctx.Cfg.Registry.Username + ":" + ctx.Cfg.Registry.Password))
 
 	// 创建目录
 	ctx.RunCmd(fmt.Sprintf("mkdir -p /etc/containerd/certs.d/%s", regDomain))
@@ -185,7 +187,10 @@ func ConfiguraRegistryContainerd(ctx *Context) error {
 
 [host."%s"]
   capabilities = ["pull", "resolve", "push"]
-`, regUrl, regUrl)
+
+[host."%s".header]
+  authorization = "Basic %s"
+`, regUrl, regUrl, regUrl, regAuth)
 
 	cmd := fmt.Sprintf("cat > /etc/containerd/certs.d/%s/hosts.toml <<EOF\n%s\nEOF", regDomain, hostsToml)
 	if _, err := ctx.RunCmd(cmd); err != nil {
@@ -226,16 +231,23 @@ func InstallNerdctl(ctx *Context, vFolder string) error {
 	return err
 }
 
-// --- GPU ---
-func CheckGPUConfig(ctx *Context) (bool, error) {
-	if !ctx.HasGPU {
-		return true, nil
+// --- Accelerators ---
+func CheckAcceleratorConfig(ctx *Context) (bool, error) {
+	if ctx.HasGPU {
+		if out, err := ctx.RunCmd("test -e /etc/containerd/conf.d/99-nvidia.toml && echo EXISTS || echo MISSING"); err != nil || strings.TrimSpace(out) == "MISSING" {
+			return false, err
+		}
+		if _, err := ctx.RunCmd("nvidia-container-cli info"); err != nil {
+			return false, err
+		}
 	}
 
-	if out, err := ctx.RunCmd("test -e /etc/containerd/conf.d/99-nvidia.toml && echo EXISTS || echo MISSING"); err != nil || strings.TrimSpace(out) == "MISSING" {
-		return false, err
+	if ctx.HasNPU {
+		out, err := ctx.RunCmd("cat /etc/containerd/config.toml | grep ascend-docker-runtime || true")
+		if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
+			return false, err
+		}
 	}
 
-	_, err := ctx.RunCmd("nvidia-container-cli info")
-	return err == nil, nil
+	return true, nil
 }

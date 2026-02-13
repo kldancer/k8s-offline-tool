@@ -102,9 +102,30 @@ func (c *Client) DetectArch() (string, error) {
 	return strings.TrimSpace(out), nil
 }
 
+// ProgressReader wraps an io.Reader to track progress
+type ProgressReader struct {
+	Reader     io.Reader
+	Total      int64
+	Current    int64
+	OnProgress func(current, total int64)
+}
+
+func (pr *ProgressReader) Read(p []byte) (n int, err error) {
+	n, err = pr.Reader.Read(p)
+	pr.Current += int64(n)
+	if pr.OnProgress != nil {
+		pr.OnProgress(pr.Current, pr.Total)
+	}
+	return
+}
+
 // WriteFile 将流数据写入远程文件 (Stream Mode)
 // 修复：接收 io.Reader 替代 []byte，解决大文件内存占用和传输阻塞问题
 func (c *Client) WriteFile(remotePath string, src io.Reader) error {
+	return c.WriteFileWithProgress(remotePath, src, 0, nil)
+}
+
+func (c *Client) WriteFileWithProgress(remotePath string, src io.Reader, total int64, onProgress func(current, total int64)) error {
 	// 1. 强制转换为正斜杠
 	remotePath = filepath.ToSlash(remotePath)
 
@@ -123,9 +144,17 @@ func (c *Client) WriteFile(remotePath string, src io.Reader) error {
 	}
 	defer f.Close()
 
+	var reader io.Reader = src
+	if onProgress != nil {
+		reader = &ProgressReader{
+			Reader:     src,
+			Total:      total,
+			OnProgress: onProgress,
+		}
+	}
+
 	// 4. 流式拷贝 (Buffer Copy)
-	// io.Copy 内部会自动处理分块读取和写入，比一次性 Write 稳定得多
-	if _, err := io.Copy(f, src); err != nil {
+	if _, err := io.Copy(f, reader); err != nil {
 		return fmt.Errorf("sftp transfer failed: %v", err)
 	}
 

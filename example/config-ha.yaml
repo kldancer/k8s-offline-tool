@@ -1,19 +1,16 @@
-install_mode: "full"
+install_mode: "addons-only"
+resource_package: "example/resources-ubuntu-amd64.tar.gz"
 
 # 组件部署配置（默认不启用）
 addons:
   kube_ovn:
     enabled: true
-    version: "1.15.2"
   multus_cni:
     enabled: true
-    version: "snapshot-thick"
   hami:
-    enabled: false
-    version: "2.8.0"
+    enabled: true
   kube_prometheus_stack:
-    enabled: false
-    version: "81.6.0"
+    enabled: true
 
 # 仅执行预检查，不执行安装动作
 dry_run: false

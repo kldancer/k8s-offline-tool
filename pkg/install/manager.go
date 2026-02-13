@@ -86,14 +86,16 @@ func (m *Manager) detectEnv() error {
 	}
 
 	// 合并探测命令以减少 RTT
-	// 输出格式: NAME|VERSION_ID|KERNEL|HAS_GPU
+	// 输出格式: NAME|VERSION_ID|KERNEL|HAS_GPU|HAS_NPU
 	probeCmd := `
 name=$(grep '^NAME=' /etc/os-release | cut -d= -f2 | sed 's/"//g')
 version=$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | sed 's/"//g')
 kernel=$(uname -r)
 gpu="false"
 if lspci | grep -i nvidia >/dev/null 2>&1; then gpu="true"; fi
-echo "${name}|${version}|${kernel}|${gpu}"
+npu="false"
+if lspci | grep -i "Huawei" >/dev/null 2>&1; then npu="true"; fi
+echo "${name}|${version}|${kernel}|${gpu}|${npu}"
 `
 	out, err := m.client.RunCommand(strings.TrimSpace(probeCmd))
 	if err != nil {
@@ -101,7 +103,7 @@ echo "${name}|${version}|${kernel}|${gpu}"
 	}
 
 	parts := strings.Split(strings.TrimSpace(out), "|")
-	if len(parts) != 4 {
+	if len(parts) != 5 {
 		return fmt.Errorf("unexpected probe output: %s", out)
 	}
 
@@ -109,6 +111,7 @@ echo "${name}|${version}|${kernel}|${gpu}"
 	systemVersion := parts[1]
 	kernelVersion := parts[2]
 	hasGPU := parts[3] == "true"
+	hasNPU := parts[4] == "true"
 
 	m.context = &strategy.Context{
 		Cfg:           m.globalCfg,
@@ -117,6 +120,7 @@ echo "${name}|${version}|${kernel}|${gpu}"
 		SystemVersion: systemVersion,
 		KernelVersion: kernelVersion,
 		HasGPU:        hasGPU,
+		HasNPU:        hasNPU,
 		RemoteTmpDir:  config.RemoteTmpDir,
 		RunCmd:        m.client.RunCommand,
 	}
@@ -145,7 +149,7 @@ func (m *Manager) distributeResources() error {
 
 	// 上传压缩包
 	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
-	fmt.Fprintf(m.output, "%s  └─ 正在分发离线资源包: %s\n", prefix, filepath.Base(m.globalCfg.ResourcePackage))
+	fileName := filepath.Base(m.globalCfg.ResourcePackage)
 
 	f, err := os.Open(m.globalCfg.ResourcePackage)
 	if err != nil {
@@ -153,9 +157,38 @@ func (m *Manager) distributeResources() error {
 	}
 	defer f.Close()
 
-	if err := m.client.WriteFile(remotePkgPath, f); err != nil {
+	fileInfo, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	totalSize := fileInfo.Size()
+
+	startTime := time.Now()
+	lastUpdate := time.Now()
+
+	onProgress := func(current, total int64) {
+		now := time.Now()
+		if now.Sub(lastUpdate) < 200*time.Millisecond && current < total {
+			return
+		}
+		lastUpdate = now
+
+		elapsed := now.Sub(startTime).Seconds()
+		if elapsed <= 0 {
+			elapsed = 0.1
+		}
+		speed := float64(current) / elapsed / 1024 / 1024 // MB/s
+		percent := float64(current) / float64(total) * 100
+
+		fmt.Fprintf(m.output, "\r%s  └─ 正在分发: %s %.2f%% (%.1f/%.1f MB) %.2f MB/s",
+			prefix, fileName, percent, float64(current)/1024/1024, float64(total)/1024/1024, speed)
+	}
+
+	if err := m.client.WriteFileWithProgress(remotePkgPath, f, totalSize, onProgress); err != nil {
+		fmt.Fprintf(m.output, "\n")
 		return fmt.Errorf("upload resource package failed: %v", err)
 	}
+	fmt.Fprintf(m.output, "\n")
 
 	// 3. 远端清理并解压
 	fmt.Fprintf(m.output, "%s  └─ 正在远端解压资源...\n", prefix)
@@ -185,8 +218,8 @@ func (m *Manager) Run(dryRun bool) error {
 	if m.nodeCfg.IsMaster {
 		role = "master"
 	}
-	fmt.Fprintf(m.output, "%s(%d/%d %s) 检测到 %s %s | KernelVersion: %s | Arch: %s | GPU: %v\n", prefix,
-		m.nodeIndex, m.totalNodes, role, m.context.SystemName, m.context.SystemVersion, m.context.KernelVersion, m.context.Arch, m.context.HasGPU)
+	fmt.Fprintf(m.output, "%s(%d/%d %s) 检测到 %s %s | KernelVersion: %s | Arch: %s | GPU: %v | NPU: %v\n", prefix,
+		m.nodeIndex, m.totalNodes, role, m.context.SystemName, m.context.SystemVersion, m.context.KernelVersion, m.context.Arch, m.context.HasGPU, m.context.HasNPU)
 
 	steps := []runner.Step{
 		{
@@ -245,18 +278,6 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.InstallDockerCEPackage,
 			},
 			runner.Step{
-				Name: "安装 Helm",
-				Check: func() (bool, error) {
-					if !m.isPrimaryExecutionNode() {
-						return true, nil
-					}
-					return m.checkHelmInstalled()
-				},
-				Action: func() error {
-					return m.installHelm()
-				},
-			},
-			runner.Step{
 				Name:   "配置cgroup 并启动 Containerd",
 				Check:  m.installer.CheckContainerdRunning,
 				Action: m.installer.ConfigureAndStartContainerd,
@@ -272,87 +293,103 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.InstallNerdctl,
 			},
 		)
-	}
 
-	if m.shouldConfigureLoadBalancer() {
-		steps = append(steps,
-			runner.Step{
-				Name: "配置 LB Sysctl 内核参数",
-				Check: func() (bool, error) {
-					return m.checkLoadBalancerSysctl()
+		if m.isPrimaryExecutionNode() {
+			steps = append(steps,
+				runner.Step{
+					Name: "安装 Helm",
+					Check: func() (bool, error) {
+						if !m.isPrimaryExecutionNode() {
+							return true, nil
+						}
+						return m.checkHelmInstalled()
+					},
+					Action: func() error {
+						return m.installHelm()
+					},
 				},
-				Action: func() error {
-					return m.configureLoadBalancerSysctl()
-				},
-			},
-			runner.Step{
-				Name: "安装 HAProxy",
-				Check: func() (bool, error) {
-					return m.installer.CheckHAProxy()
-				},
-				Action: func() error {
-					return m.installer.InstallHAProxy()
-				},
-			},
-			runner.Step{
-				Name: "配置 HAProxy",
-				Check: func() (bool, error) {
-					return m.checkHAProxyConfig()
-				},
-				Action: func() error {
-					return m.configureHAProxy()
-				},
-			},
-			runner.Step{
-				Name: "安装 Keepalived",
-				Check: func() (bool, error) {
-					return m.installer.CheckKeepalived()
-				},
-				Action: func() error {
-					return m.installer.InstallKeepalived()
-				},
-			},
-			runner.Step{
-				Name: "配置 Keepalived",
-				Check: func() (bool, error) {
-					return m.checkKeepalivedConfig()
-				},
-				Action: func() error {
-					return m.configureKeepalived()
-				},
-			},
-		)
-	}
+			)
+		}
 
-	if m.globalCfg.Registry.Endpoint != "" {
-		steps = append(steps,
-			runner.Step{
-				Name:   "配置私有镜像仓库,并重启 Containerd",
-				Check:  m.installer.CheckConfiguraRegistryContainerd,
-				Action: m.installer.ConfiguraRegistryContainerd,
-			},
-		)
-	}
+		// ha
+		if m.shouldConfigureLoadBalancer() {
+			steps = append(steps,
+				runner.Step{
+					Name: "配置 LB Sysctl 内核参数",
+					Check: func() (bool, error) {
+						return m.checkLoadBalancerSysctl()
+					},
+					Action: func() error {
+						return m.configureLoadBalancerSysctl()
+					},
+				},
+				runner.Step{
+					Name: "安装 HAProxy",
+					Check: func() (bool, error) {
+						return m.installer.CheckHAProxy()
+					},
+					Action: func() error {
+						return m.installer.InstallHAProxy()
+					},
+				},
+				runner.Step{
+					Name: "配置 HAProxy",
+					Check: func() (bool, error) {
+						return m.checkHAProxyConfig()
+					},
+					Action: func() error {
+						return m.configureHAProxy()
+					},
+				},
+				runner.Step{
+					Name: "安装 Keepalived",
+					Check: func() (bool, error) {
+						return m.installer.CheckKeepalived()
+					},
+					Action: func() error {
+						return m.installer.InstallKeepalived()
+					},
+				},
+				runner.Step{
+					Name: "配置 Keepalived",
+					Check: func() (bool, error) {
+						return m.checkKeepalivedConfig()
+					},
+					Action: func() error {
+						return m.configureKeepalived()
+					},
+				},
+			)
+		}
 
-	if m.context.HasGPU {
-		steps = append(steps,
-			runner.Step{
-				Name:   "配置 GPU 运行时",
-				Check:  m.installer.CheckGPUConfig,
-				Action: m.installer.ConfigureGPU,
-			},
-		)
-	}
+		// registry
+		if m.globalCfg.Registry.Endpoint != "" {
+			steps = append(steps,
+				runner.Step{
+					Name:   "配置私有镜像仓库,并重启 Containerd",
+					Check:  m.installer.CheckConfiguraRegistryContainerd,
+					Action: m.installer.ConfiguraRegistryContainerd,
+				},
+			)
+		}
 
-	if m.globalCfg.InstallMode != config.InstallModeAddonsOnly {
-		// 非 addons模式下，需要安装Kubernetes 组件
+		// 加速卡运行时
+		if m.context.HasGPU || m.context.HasNPU {
+			steps = append(steps,
+				runner.Step{
+					Name:   "配置加速卡运行时",
+					Check:  m.installer.CheckAcceleratorConfig,
+					Action: m.installer.ConfigureAccelerator,
+				},
+			)
+		}
+
 		steps = append(steps,
 			runner.Step{
 				Name:   "安装 Kubernetes 组件",
 				Check:  m.installer.CheckK8sComponents,
 				Action: m.installer.InstallK8sComponents,
 			})
-
 	}
 
 	// full模式下，需要初始化或加入集群
@@ -366,7 +403,7 @@ func (m *Manager) Run(dryRun bool) error {
 		)
 	}
 
-	if m.shouldDeployAddonsOnNode() {
+	if m.isPrimaryExecutionNode() && m.globalCfg.InstallMode != config.InstallModePreInit {
 		steps = append(steps, m.addonSteps()...)
 	}
 
@@ -376,14 +413,6 @@ func (m *Manager) Run(dryRun bool) error {
 
 func (m *Manager) shouldConfigureLoadBalancer() bool {
 	return m.globalCfg.HA.Enabled && m.nodeCfg.IsMaster
-}
-
-func (m *Manager) shouldDeployAddonsOnNode() bool {
-	if m.globalCfg.InstallMode == config.InstallModeInstallOnly {
-		return false
-	}
-	return (m.nodeCfg.IsMaster && !m.globalCfg.HA.Enabled) ||
-		(m.nodeCfg.IsPrimaryMaster && m.globalCfg.HA.Enabled)
 }
 
 func (m *Manager) isPrimaryMaster() bool {
@@ -590,29 +619,32 @@ sudo chmod a+x /etc/keepalived/check_haproxy.sh`
 }
 
 func (m *Manager) addonSteps() []runner.Step {
-	return []runner.Step{
-		{
+	mode := m.globalCfg.InstallMode
+	steps := []runner.Step{}
+
+	// 1. Kube-OVN CNI (Full or AddonsOnly)
+	if m.globalCfg.Addons.KubeOvn.Enabled {
+		steps = append(steps, runner.Step{
 			Name: "部署 Kube-OVN CNI",
 			Check: func() (bool, error) {
-				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.KubeOvn.Enabled {
+				out, err := m.context.RunCmd("test -e /etc/cni/net.d/01-kube-ovn.conflist && echo EXISTS || echo MISSING")
+				if err != nil {
+					return true, err
+				}
+				if strings.TrimSpace(out) == "EXISTS" {
 					return true, nil
 				}
-
-				out, err := m.context.RunCmd("kubectl -n kube-system get deployment kube-ovn-controller --ignore-not-found -o name")
-				if err != nil {
-					return false, err
-				}
-				return strings.TrimSpace(out) != "", nil
+				return false, nil
 			},
 			Action: m.deployKubeOvn,
-		},
-		{
+		})
+	}
+
+	// 2. Multus CNI (Full or AddonsOnly)
+	if m.globalCfg.Addons.MultusCNI.Enabled {
+		steps = append(steps, runner.Step{
 			Name: "部署 Multus CNI",
 			Check: func() (bool, error) {
-				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.MultusCNI.Enabled {
-					return true, nil
-				}
-
 				out, err := m.context.RunCmd("test -e /etc/cni/net.d/00-multus.conf && echo EXISTS || echo MISSING")
 				if err != nil {
 					return true, err
@@ -623,27 +655,29 @@ func (m *Manager) addonSteps() []runner.Step {
 				return false, nil
 			},
 			Action: m.deployMultusCNI,
-		},
-		{
+		})
+	}
+
+	// 3. kube-prometheus-stack (AddonsOnly only)
+	if mode == config.InstallModeAddonsOnly && m.globalCfg.Addons.KubePrometheus.Enabled {
+		steps = append(steps, runner.Step{
 			Name: "部署 kube-prometheus-stack",
 			Check: func() (bool, error) {
-				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.KubePrometheus.Enabled {
-					return true, nil
-				}
-				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^kube-prometheus-stack$' || true")
+				out, err := m.context.RunCmd("helm -n monitoring list -q | grep -w '^kube-prometheus-stack$' || true")
 				if err != nil {
 					return false, err
 				}
 				return strings.TrimSpace(out) == "kube-prometheus-stack", nil
 			},
 			Action: m.deployKubePrometheusStack,
-		},
-		{
+		})
+	}
+
+	// 4. HAMI (AddonsOnly only)
+	if mode == config.InstallModeAddonsOnly && m.globalCfg.Addons.Hami.Enabled {
+		steps = append(steps, runner.Step{
 			Name: "部署 HAMI",
 			Check: func() (bool, error) {
-				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.Hami.Enabled {
-					return true, nil
-				}
 				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami$' || true")
 				if err != nil {
 					return false, err
@@ -651,22 +685,48 @@ func (m *Manager) addonSteps() []runner.Step {
 				return strings.TrimSpace(out) == "hami", nil
 			},
 			Action: m.deployHami,
-		},
-		{
+		})
+
+		steps = append(steps, runner.Step{
 			Name: "部署 HAMI-WebUI",
 			Check: func() (bool, error) {
-				if !m.isPrimaryExecutionNode() || !m.globalCfg.Addons.Hami.Enabled {
-					return true, nil
-				}
-				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami$' || true")
+				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami-webui$' || true")
 				if err != nil {
 					return false, err
 				}
-				return strings.TrimSpace(out) == "hami", nil
+				return strings.TrimSpace(out) == "hami-webui", nil
 			},
 			Action: m.deployHamiWebUI,
-		},
+		})
 	}
+
+	// 5. ascend-device-plugin (AddonsOnly)
+	// 仅在 addons-only 模式、已成功部署 HAMi 且集群中存在 Ascend 节点时才会触发。
+	if mode == config.InstallModeAddonsOnly && m.globalCfg.Addons.Hami.Enabled {
+		steps = append(steps, runner.Step{
+			Name: "部署 ascend-device-plugin",
+			Check: func() (bool, error) {
+				hamiOut, _ := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami$' || true")
+				if strings.TrimSpace(hamiOut) != "hami" {
+					return true, nil // Skip if hami not found
+				}
+
+				npuOut, _ := m.context.RunCmd("kubectl get node -l ascend=on -o name")
+				if strings.TrimSpace(npuOut) == "" {
+					return true, nil // Skip if no ascend nodes
+				}
+
+				out, err := m.context.RunCmd("kubectl get ds -n kube-system hami-ascend-device-plugin --ignore-not-found -o name")
+				if err != nil {
+					return false, err
+				}
+				return strings.TrimSpace(out) != "", nil
+			},
+			Action: m.deployAscendDevicePlugin,
+		})
+	}
+
+	return steps
 }
 
 func (m *Manager) registryHost() (string, bool) {
@@ -728,7 +788,122 @@ func (m *Manager) deployKubePrometheusStack() error {
 }
 
 func (m *Manager) deployHami() error {
+	if err := m.ensureAdminConf(); err != nil {
+		return err
+	}
+
+	// 1. 遍历所有节点并打标
+	hasAscend, err := m.labelAcceleratorNodes()
+	if err != nil {
+		return fmt.Errorf("failed to label accelerator nodes: %v", err)
+	}
+
+	// 2. 修改 values.yaml
+	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "hami", "values.yaml")
+	if hasAscend {
+		// 使用更精确的 sed 命令：匹配以 'ascend:' 开头的行，并在该行到后续 'enabled:' 出现的范围内，将 'enabled: false' 替换为 'enabled: true'
+		cmd := fmt.Sprintf("sed -i '/ascend:/,/enabled:/ s/enabled: false/enabled: true/' %s", valuesPath)
+		if _, err := m.context.RunCmd(cmd); err != nil {
+			return fmt.Errorf("failed to enable ascend in hami values.yaml: %v", err)
+		}
+	}
+
 	return m.deployHelmAddon("hami", "hami-images", path.Join("hami", "hami"), config.DefaultHamiChart, "kube-system")
+}
+
+func (m *Manager) labelAcceleratorNodes() (bool, error) {
+	// 获取集群节点 IP 到 名称的映射
+	nodeMapCmd := "kubectl get nodes -o custom-columns='NAME:.metadata.name,IP:.status.addresses[?(@.type==\"InternalIP\")].address' --no-headers"
+	out, err := m.context.RunCmd(nodeMapCmd)
+	if err != nil {
+		return false, err
+	}
+
+	ipToName := make(map[string]string)
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	for _, line := range lines {
+		parts := strings.Fields(line)
+		if len(parts) >= 2 {
+			ipToName[parts[1]] = parts[0]
+		}
+	}
+
+	hasAscendTotal := false
+	for _, node := range m.globalCfg.Nodes {
+		nodeName, ok := ipToName[node.IP]
+		if !ok {
+			continue
+		}
+
+		// 探测节点加速卡类型
+		// 我们通过 SSH 连接到每个节点进行探测
+		gpu, npu, err := m.probeNodeAccelerators(node)
+		if err != nil {
+			fmt.Fprintf(m.output, "  └─ [Warning] Failed to probe accelerators on %s: %v\n", node.IP, err)
+			continue
+		}
+
+		if gpu {
+			m.context.RunCmd(fmt.Sprintf("kubectl label node %s gpu=on --overwrite", nodeName))
+		}
+		if npu {
+			m.context.RunCmd(fmt.Sprintf("kubectl label node %s ascend=on --overwrite", nodeName))
+			hasAscendTotal = true
+		}
+	}
+	return hasAscendTotal, nil
+}
+
+func (m *Manager) probeNodeAccelerators(node config.NodeConfig) (bool, bool, error) {
+	// 如果是当前节点，直接用 context
+	if node.IP == m.nodeCfg.IP {
+		return m.context.HasGPU, m.context.HasNPU, nil
+	}
+
+	// 否则需要建立临时 SSH 连接
+	port := node.SSHPort
+	if port == 0 {
+		port = m.globalCfg.SSHPort
+	}
+	client, err := ssh.NewClient(node.IP, port, m.globalCfg.User, node.Password, time.Duration(m.globalCfg.CommandTimeoutSeconds)*time.Second)
+	if err != nil {
+		return false, false, err
+	}
+	defer client.Close()
+
+	probeCmd := `
+gpu="false"; if lspci | grep -i nvidia >/dev/null 2>&1; then gpu="true"; fi
+npu="false"; if lspci | grep -i "Huawei" >/dev/null 2>&1; then npu="true"; fi
+echo "${gpu}|${npu}"
+`
+	out, err := client.RunCommand(strings.TrimSpace(probeCmd))
+	if err != nil {
+		return false, false, err
+	}
+	parts := strings.Split(strings.TrimSpace(out), "|")
+	if len(parts) != 2 {
+		return false, false, fmt.Errorf("unexpected probe output: %s", out)
+	}
+	return parts[0] == "true", parts[1] == "true", nil
+}
+
+func (m *Manager) deployAscendDevicePlugin() error {
+	if err := m.ensureAdminConf(); err != nil {
+		return err
+	}
+	manifestPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "ascend-device-plugin", "ascend-device-plugin.yaml")
+
+	// 处理私有仓库
+	if registryHost, ok := m.registryHost(); ok {
+		cmd := fmt.Sprintf("sed -i 's|docker.io|%s|g' %s", registryHost, manifestPath)
+		if _, err := m.context.RunCmd(cmd); err != nil {
+			return err
+		}
+	}
+
+	cmd := fmt.Sprintf("kubectl apply -f %s", manifestPath)
+	_, err := m.context.RunCmd(cmd)
+	return err
 }
 
 func (m *Manager) deployHamiWebUI() error {

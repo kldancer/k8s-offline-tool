@@ -118,16 +118,35 @@ func (u *UbuntuInstaller) InstallNerdctl() error {
 	return InstallNerdctl(u.Ctx, vFolder)
 }
 
-// --- GPU ---
-func (u *UbuntuInstaller) CheckGPUConfig() (bool, error) {
-	return CheckGPUConfig(u.Ctx)
+// --- Accelerators ---
+func (u *UbuntuInstaller) CheckAcceleratorConfig() (bool, error) {
+	return CheckAcceleratorConfig(u.Ctx)
 }
 
-func (u *UbuntuInstaller) ConfigureGPU() error {
-	debPath := fmt.Sprintf("%s/common-tools/%s/apt/nvidia-container-toolkit*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
-	u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s", debPath))
-	u.Ctx.RunCmd("nvidia-ctk runtime configure --runtime=containerd")
-	u.Ctx.RunCmd("systemctl restart containerd")
+func (u *UbuntuInstaller) ConfigureAccelerator() error {
+	if u.Ctx.HasGPU {
+		debPath := fmt.Sprintf("%s/common-tools/%s/apt/nvidia-container-toolkit*.deb", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
+		u.Ctx.RunCmd(fmt.Sprintf("dpkg -i %s", debPath))
+		u.Ctx.RunCmd("nvidia-ctk runtime configure --runtime=containerd")
+		// default_runtime_name 改为 nvidia
+		u.Ctx.RunCmd("sed -i 's/^\\([[:space:]]*default_runtime_name[[:space:]]*=[[:space:]]*\\)\"runc\"/\\1\"nvidia\"/' /etc/containerd/conf.d/99-nvidia.toml")
+		u.Ctx.RunCmd("systemctl restart containerd")
+	}
+
+	if u.Ctx.HasNPU {
+		runtimeDir := fmt.Sprintf("%s/docker-runtime/ascend/%s", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
+		installCmd := fmt.Sprintf("cd %s && ./*.run --install", runtimeDir)
+		if _, err := u.Ctx.RunCmd(installCmd); err != nil {
+			return fmt.Errorf("failed to install ascend docker runtime: %v", err)
+		}
+
+		out, err := u.Ctx.RunCmd("cat /etc/containerd/config.toml | grep ascend-docker-runtime")
+		if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
+			return fmt.Errorf("failed to verify ascend docker runtime installation: %v", err)
+		}
+		u.Ctx.RunCmd("systemctl restart containerd")
+	}
+
 	return nil
 }
 
