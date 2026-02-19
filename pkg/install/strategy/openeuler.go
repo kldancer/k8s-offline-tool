@@ -35,9 +35,7 @@ func (o *OpenEulerInstaller) CheckSwap() (bool, error) {
 	return CheckSwap(o.Ctx)
 }
 func (o *OpenEulerInstaller) DisableSwap() error {
-	o.Ctx.RunCmd("swapoff -a")
-	o.Ctx.RunCmd("sed -i '/swap/s/^/#/' /etc/fstab")
-	return nil
+	return DisableSwap(o.Ctx)
 }
 func (o *OpenEulerInstaller) CheckKernelModules() (bool, error) {
 	return CheckKernelModules(o.Ctx)
@@ -49,24 +47,10 @@ func (o *OpenEulerInstaller) LoadKernelModules() error {
 	return o.ConfigureSysctl()
 }
 func (o *OpenEulerInstaller) CheckSysctl() (bool, error) {
-	commonOK, err := CheckSysctl(o.Ctx)
-	if err != nil || !commonOK {
-		return commonOK, err
-	}
-
-	_, err = o.Ctx.RunCmd("cat /etc/sysctl.d/99-sysctl.conf | grep net.ipv4.ip_forward=1")
-	return err == nil, nil
+	return false, nil
 }
 func (o *OpenEulerInstaller) ConfigureSysctl() error {
-	if err := ConfigureSysctl(o.Ctx); err != nil {
-		return err
-	}
-
-	cmd := `sed -ri '/^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=/d' /etc/sysctl.d/99-sysctl.conf &&
-echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.d/99-sysctl.conf &&
-sysctl --system`
-	_, err := o.Ctx.RunCmd(cmd)
-	return err
+	return ConfigureSysctl(o.Ctx)
 }
 
 // --- Tools ---
@@ -159,17 +143,7 @@ func (o *OpenEulerInstaller) ConfigureAccelerator() error {
 	}
 
 	if o.Ctx.HasNPU {
-		runtimeDir := fmt.Sprintf("%s/docker-runtime/ascend/%s", o.Ctx.RemoteTmpDir, o.Ctx.Arch)
-		installCmd := fmt.Sprintf("cd %s && ./*.run --install", runtimeDir)
-		if _, err := o.Ctx.RunCmd(installCmd); err != nil {
-			return fmt.Errorf("failed to install ascend docker runtime: %v", err)
-		}
-
-		out, err := o.Ctx.RunCmd("cat /etc/containerd/config.toml | grep ascend-docker-runtime")
-		if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
-			return fmt.Errorf("failed to verify ascend docker runtime installation: %v", err)
-		}
-		o.Ctx.RunCmd("systemctl restart containerd")
+		return ConfigureNpuContainerRuntime(o.Ctx)
 	}
 
 	return nil

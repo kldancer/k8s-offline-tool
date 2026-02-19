@@ -14,7 +14,7 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "example/config-ha.yaml", "配置文件路径。e.g. config.yaml")
+	cfgPath := flag.String("config", "example/config-1.yaml", "配置文件路径。e.g. config.yaml")
 	flag.Parse()
 
 	// 1. 加载配置
@@ -32,7 +32,12 @@ func main() {
 	if cfg.DryRun {
 		runMode = "预检查"
 	}
-	fmt.Printf("开始%s %d 个节点...\n\n", runMode, len(cfg.Nodes))
+
+	if cfg.InstallMode == config.InstallModeAddonsOnly {
+		fmt.Printf("安装插件模式...")
+	} else {
+		fmt.Printf("开始%s %d 个节点...\n\n", runMode, len(cfg.Nodes))
+	}
 
 	results := make([]nodeResult, 0, len(cfg.Nodes))
 	runIndex := 0

@@ -13,9 +13,15 @@ func CheckSwap(ctx *Context) (bool, error) {
 	return strings.TrimSpace(out) == "", nil
 }
 
+func DisableSwap(ctx *Context) error {
+	ctx.RunCmd("swapoff -a")
+	ctx.RunCmd("sed -i '/\\/swap.img/s/^/#/' /etc/fstab")
+	return nil
+}
+
 func CheckKernelModules(ctx *Context) (bool, error) {
 	out, err := ctx.RunCmd("cat /etc/modules-load.d/containerd.conf")
-	return err == nil && strings.Contains(out, "overlay"), nil
+	return err == nil && strings.Contains(out, "overlay") && strings.Contains(out, "br_netfilter"), nil
 }
 
 func LoadKernelModules(ctx *Context) error {
@@ -28,18 +34,15 @@ EOF`)
 	return nil
 }
 
-func CheckSysctl(ctx *Context) (bool, error) {
-	out, err := ctx.RunCmd("cat /etc/sysctl.d/99-kubernetes-cri.conf")
-	return err == nil && strings.Contains(out, "net.ipv4.ip_forward"), nil
-}
-
 func ConfigureSysctl(ctx *Context) error {
-	ctx.RunCmd(`cat > /etc/sysctl.d/99-kubernetes-cri.conf << EOF
+	ctx.RunCmd(`cat > /etc/sysctl.d/99-kubernetes-tool.conf << EOF
 net.bridge.bridge-nf-call-iptables  = 1
 net.ipv4.ip_forward                 = 1
 net.bridge.bridge-nf-call-ip6tables = 1
 EOF`)
-	ctx.RunCmd("sysctl --system")
+	ctx.RunCmd(`sed -ri '/^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=/d' /etc/sysctl.d/99-sysctl.conf &&
+echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.d/99-sysctl.conf`)
+	ctx.RunCmd(" sysctl -p 99-kubernetes-tool.conf")
 	return nil
 }
 
@@ -134,8 +137,8 @@ WantedBy=multi-user.target
 }
 
 func CheckContainerdRunning(ctx *Context) (bool, error) {
-	out, _ := ctx.RunCmd("systemctl is-active containerd")
-	return strings.TrimSpace(out) == "active", nil
+	// 不必检查，直接覆盖执行即可
+	return false, nil
 }
 
 func ConfigureAndStartContainerd(ctx *Context) error {
@@ -146,6 +149,10 @@ func ConfigureAndStartContainerd(ctx *Context) error {
 	// 2. 修改 SystemdCgroup
 	ctx.RunCmd("sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml")
 
+	// 3. 修改 sandbox镜像
+	c := fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/%s'|sandbox = '%s/google_containers/%s'|g\" /etc/containerd/config.toml", config.DefaultPauseImage, config.DefaultK8sImageRegistry, config.DefaultPauseImage)
+	ctx.RunCmd(c)
+
 	// 3. 启动服务
 	ctx.RunCmd("systemctl daemon-reload")
 	ctx.RunCmd("systemctl enable --now containerd || true")
@@ -154,13 +161,8 @@ func ConfigureAndStartContainerd(ctx *Context) error {
 }
 
 func CheckConfiguraRegistryContainerd(ctx *Context) (bool, error) {
-	regDomain := ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", ctx.Cfg.Registry.Port)
-	path := fmt.Sprintf("/etc/containerd/certs.d/%s/hosts.toml", regDomain)
-	out, err := ctx.RunCmd(fmt.Sprintf("test -e %s && echo EXISTS || echo MISSING", path))
-	if err != nil {
-		return false, err
-	}
-	return strings.TrimSpace(out) == "EXISTS", nil
+	// 不必检查，直接覆盖执行即可
+	return false, nil
 }
 
 func ConfiguraRegistryContainerd(ctx *Context) error {
@@ -170,7 +172,7 @@ func ConfiguraRegistryContainerd(ctx *Context) error {
 	regDomain := ctx.Cfg.Registry.Endpoint + fmt.Sprintf(":%d", ctx.Cfg.Registry.Port)
 
 	// 1.3 修改 sandbox镜像
-	c := fmt.Sprintf("sed -i \"s|sandbox = 'registry.k8s.io/pause:3.10.1'|sandbox = '%s/google_containers/%s'|g\" /etc/containerd/config.toml", regDomain, config.DefaultPauseImage)
+	c := fmt.Sprintf("sed -i \"s|sandbox = '%s/google_containers/%s'|sandbox = '%s/google_containers/%s'|g\" /etc/containerd/config.toml", config.DefaultK8sImageRegistry, config.DefaultPauseImage, regDomain, config.DefaultPauseImage)
 	ctx.RunCmd(c)
 
 	// 1.4 添加域名解析配置
@@ -203,8 +205,8 @@ func ConfiguraRegistryContainerd(ctx *Context) error {
 }
 
 func CheckCrictl(ctx *Context) (bool, error) {
-	out, err := ctx.RunCmd("cat /etc/crictl.yaml")
-	return err == nil && strings.Contains(out, "containerd.sock"), nil
+	// 不必检查，直接覆盖执行即可
+	return false, nil
 }
 
 func ConfigureCrictl(ctx *Context) error {
@@ -243,11 +245,29 @@ func CheckAcceleratorConfig(ctx *Context) (bool, error) {
 	}
 
 	if ctx.HasNPU {
-		out, err := ctx.RunCmd("cat /etc/containerd/config.toml | grep ascend-docker-runtime || true")
+		out, err := ctx.RunCmd("cat /etc/containerd/config.toml.rpmsave | grep ascend-docker-runtime || true")
 		if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
 			return false, err
 		}
 	}
 
 	return true, nil
+}
+
+func ConfigureNpuContainerRuntime(ctx *Context) error {
+	runtimeDir := fmt.Sprintf("%s/docker-runtime/ascend/%s", ctx.RemoteTmpDir, ctx.Arch)
+
+	ctx.RunCmd(fmt.Sprintf("chmod u+x %s/*.run", runtimeDir))
+
+	installCmd := fmt.Sprintf("cd %s && ./*.run --install", runtimeDir)
+	if _, err := ctx.RunCmd(installCmd); err != nil {
+		return fmt.Errorf("failed to install ascend docker runtime: %v", err)
+	}
+
+	out, err := ctx.RunCmd("cat /etc/containerd/config.toml.rpmsave | grep ascend-docker-runtime")
+	if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
+		return fmt.Errorf("failed to verify ascend docker runtime installation: %v", err)
+	}
+	ctx.RunCmd("systemctl restart containerd")
+	return nil
 }

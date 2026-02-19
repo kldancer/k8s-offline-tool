@@ -24,7 +24,8 @@ const (
 var SupportedInstallModes = []string{InstallModeFull, InstallModeAddonsOnly, InstallModePreInit}
 
 const (
-	DefaultPauseImage = "pause:3.10.1"
+	DefaultPauseImage       = "pause:3.10.1"
+	DefaultK8sImageRegistry = "registry.aliyuncs.com"
 
 	DefaultKubeOvnChart             = "kube-ovn-v1.15.2.tgz"
 	DefaultHamiChart                = "hami-2.7.1.tgz"

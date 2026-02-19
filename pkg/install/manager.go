@@ -299,9 +299,6 @@ func (m *Manager) Run(dryRun bool) error {
 				runner.Step{
 					Name: "安装 Helm",
 					Check: func() (bool, error) {
-						if !m.isPrimaryExecutionNode() {
-							return true, nil
-						}
 						return m.checkHelmInstalled()
 					},
 					Action: func() error {
@@ -413,10 +410,6 @@ func (m *Manager) Run(dryRun bool) error {
 
 func (m *Manager) shouldConfigureLoadBalancer() bool {
 	return m.globalCfg.HA.Enabled && m.nodeCfg.IsMaster
-}
-
-func (m *Manager) isPrimaryMaster() bool {
-	return m.nodeCfg.IsMaster && m.nodeCfg.IsPrimaryMaster
 }
 
 func (m *Manager) isPrimaryExecutionNode() bool {
@@ -830,6 +823,7 @@ func (m *Manager) labelAcceleratorNodes() (bool, error) {
 
 	hasAscendTotal := false
 	for _, node := range m.globalCfg.Nodes {
+		//nodeName := "bms-d838"
 		nodeName, ok := ipToName[node.IP]
 		if !ok {
 			continue
@@ -999,14 +993,15 @@ func (m *Manager) checkClusterStatus() (bool, error) {
 	// 注意：对于 Worker 节点，可能没有 admin.conf，可以检查 kubelet.conf
 	if !m.nodeCfg.IsMaster {
 		out, err = m.client.RunCommand("ls /etc/kubernetes/kubelet.conf")
-	}
-	if m.nodeCfg.IsMaster && err == nil && out != "" {
-		if m.globalCfg.HA.Enabled && !m.isPrimaryMaster() {
-			return true, nil
-		}
-		err = m.generateClusterJoinCommands()
-		if err != nil {
-			return false, err
+	} else {
+		if err == nil && out != "" {
+			if !m.isPrimaryExecutionNode() {
+				return true, nil
+			}
+			err = m.generateClusterJoinCommands()
+			if err != nil {
+				return false, err
+			}
 		}
 	}
 
@@ -1015,13 +1010,15 @@ func (m *Manager) checkClusterStatus() (bool, error) {
 
 func (m *Manager) runKubeadm() error {
 	if m.nodeCfg.IsMaster {
-		if m.globalCfg.HA.Enabled && !m.isPrimaryMaster() {
+		if !m.isPrimaryExecutionNode() {
+			// 次master节点加入集群
 			if strings.TrimSpace(m.globalCfg.MasterJoinCommand) == "" {
 				return fmt.Errorf("master join command is required for HA mode")
 			}
 			_, err := m.client.RunCommand(m.globalCfg.MasterJoinCommand)
 			return err
 		}
+		// 主master节点初始化集群
 		repo := "registry.aliyuncs.com/google_containers"
 		if m.globalCfg.Registry.Endpoint != "" {
 			repo = fmt.Sprintf("%s:%d/google_containers", m.globalCfg.Registry.Endpoint, m.globalCfg.Registry.Port)
@@ -1041,7 +1038,6 @@ func (m *Manager) runKubeadm() error {
 		if err != nil {
 			return err
 		}
-		//fmt.Fprintf(m.output, "[%s] Init Result:\n%s\n", m.nodeCfg.IP, out)
 
 		m.client.RunCommand("mkdir -p $HOME/.kube && cp -f /etc/kubernetes/admin.conf $HOME/.kube/config && chown $(id -u):$(id -g) $HOME/.kube/config")
 
@@ -1052,7 +1048,7 @@ func (m *Manager) runKubeadm() error {
 
 		return nil
 	} else {
-		// Worker 节点
+		// Worker 节点加入集群
 		joinCmd := m.globalCfg.JoinCommand
 		if joinCmd != "" {
 			_, err := m.client.RunCommand(joinCmd)
@@ -1067,12 +1063,9 @@ func (m *Manager) generateClusterJoinCommands() error {
 	if err != nil {
 		return fmt.Errorf("kubeadm token create --print-join-command failed, %s", out)
 	}
-	//fmt.Fprintf(m.output, "\n[%s] Token Create Result: %s ", m.nodeCfg.IP, out)
 	m.globalCfg.JoinCommand = strings.TrimSpace(out)
+
 	if !m.globalCfg.HA.Enabled {
-		return nil
-	}
-	if !m.isPrimaryMaster() {
 		return nil
 	}
 	certOut, err := m.client.RunCommand("kubeadm init phase upload-certs --upload-certs")

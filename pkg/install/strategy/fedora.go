@@ -35,10 +35,7 @@ func (f *FedoraInstaller) CheckSwap() (bool, error) {
 	return CheckSwap(f.Ctx)
 }
 func (f *FedoraInstaller) DisableSwap() error {
-	f.Ctx.RunCmd("dnf remove -y zram-generator-defaults || true")
-	f.Ctx.RunCmd("swapoff -a")
-	f.Ctx.RunCmd("sed -i '/\\/swap.img/s/^/#/' /etc/fstab")
-	return nil
+	return DisableSwap(f.Ctx)
 }
 func (f *FedoraInstaller) CheckKernelModules() (bool, error) {
 	return CheckKernelModules(f.Ctx)
@@ -47,7 +44,7 @@ func (f *FedoraInstaller) LoadKernelModules() error {
 	return LoadKernelModules(f.Ctx)
 }
 func (f *FedoraInstaller) CheckSysctl() (bool, error) {
-	return CheckSysctl(f.Ctx)
+	return false, nil
 }
 func (f *FedoraInstaller) ConfigureSysctl() error {
 	return ConfigureSysctl(f.Ctx)
@@ -145,25 +142,7 @@ func (f *FedoraInstaller) ConfigureAccelerator() error {
 	}
 
 	if f.Ctx.HasNPU {
-		arch := f.Ctx.Arch
-		if arch == "x86_64" {
-			arch = "amd64"
-		} else if arch == "aarch64" {
-			arch = "arm64"
-		}
-
-		runtimeDir := fmt.Sprintf("%s/docker-runtime/ascend/%s", f.Ctx.RemoteTmpDir, arch)
-		installCmd := fmt.Sprintf("cd %s && ./*.run --install", runtimeDir)
-		if _, err := f.Ctx.RunCmd(installCmd); err != nil {
-			return fmt.Errorf("failed to install ascend docker runtime: %v", err)
-		}
-
-		// 然后还要通过cat /etc/containerd/config.toml | grep ascend-docker-runtime 验证一下输出，没问题才systemctl restart containerd
-		out, err := f.Ctx.RunCmd("cat /etc/containerd/config.toml | grep ascend-docker-runtime")
-		if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
-			return fmt.Errorf("failed to verify ascend docker runtime installation: %v", err)
-		}
-		f.Ctx.RunCmd("systemctl restart containerd")
+		return ConfigureNpuContainerRuntime(f.Ctx)
 	}
 
 	return nil

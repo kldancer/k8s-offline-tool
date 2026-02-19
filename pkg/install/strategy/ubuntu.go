@@ -28,9 +28,7 @@ func (u *UbuntuInstaller) CheckSwap() (bool, error) {
 	return CheckSwap(u.Ctx)
 }
 func (u *UbuntuInstaller) DisableSwap() error {
-	u.Ctx.RunCmd("swapoff -a")
-	u.Ctx.RunCmd("sed -i '/\\/swap.img/s/^/#/' /etc/fstab")
-	return nil
+	return DisableSwap(u.Ctx)
 }
 func (u *UbuntuInstaller) CheckKernelModules() (bool, error) {
 	return CheckKernelModules(u.Ctx)
@@ -39,7 +37,7 @@ func (u *UbuntuInstaller) LoadKernelModules() error {
 	return LoadKernelModules(u.Ctx)
 }
 func (u *UbuntuInstaller) CheckSysctl() (bool, error) {
-	return CheckSysctl(u.Ctx)
+	return false, nil
 }
 func (u *UbuntuInstaller) ConfigureSysctl() error {
 	return ConfigureSysctl(u.Ctx)
@@ -134,17 +132,7 @@ func (u *UbuntuInstaller) ConfigureAccelerator() error {
 	}
 
 	if u.Ctx.HasNPU {
-		runtimeDir := fmt.Sprintf("%s/docker-runtime/ascend/%s", u.Ctx.RemoteTmpDir, u.Ctx.Arch)
-		installCmd := fmt.Sprintf("cd %s && ./*.run --install", runtimeDir)
-		if _, err := u.Ctx.RunCmd(installCmd); err != nil {
-			return fmt.Errorf("failed to install ascend docker runtime: %v", err)
-		}
-
-		out, err := u.Ctx.RunCmd("cat /etc/containerd/config.toml | grep ascend-docker-runtime")
-		if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
-			return fmt.Errorf("failed to verify ascend docker runtime installation: %v", err)
-		}
-		u.Ctx.RunCmd("systemctl restart containerd")
+		return ConfigureNpuContainerRuntime(u.Ctx)
 	}
 
 	return nil
