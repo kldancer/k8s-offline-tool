@@ -273,9 +273,19 @@ func (m *Manager) Run(dryRun bool) error {
 				Action: m.installer.InstallCommonTools,
 			},
 			runner.Step{
-				Name:   "安装 DockerCE 软件包",
-				Check:  m.installer.CheckDockerCEPackage,
-				Action: m.installer.InstallDockerCEPackage,
+				Name:   "安装 Docker 软件包",
+				Check:  m.installer.CheckDockerBinary,
+				Action: m.installer.InstallDockerBinary,
+			},
+			runner.Step{
+				Name:   "安装 Containerd 软件包",
+				Check:  m.installer.CheckContainerdBinary,
+				Action: m.installer.InstallContainerdBinary,
+			},
+			runner.Step{
+				Name:   "安装 Runc 软件包",
+				Check:  m.installer.CheckRuncBinary,
+				Action: m.installer.InstallRuncBinary,
 			},
 			runner.Step{
 				Name:   "配置cgroup 并启动 Containerd",
@@ -363,7 +373,7 @@ func (m *Manager) Run(dryRun bool) error {
 		if m.globalCfg.Registry.Endpoint != "" {
 			steps = append(steps,
 				runner.Step{
-					Name:   "配置私有镜像仓库,并重启 Containerd",
+					Name:   "配置Containerd 私有镜像仓库",
 					Check:  m.installer.CheckConfiguraRegistryContainerd,
 					Action: m.installer.ConfiguraRegistryContainerd,
 				},

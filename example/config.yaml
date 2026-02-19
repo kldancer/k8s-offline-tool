@@ -8,9 +8,9 @@ addons:
   multus_cni:
     enabled: true
   hami:
-    enabled: false
+    enabled: true
   kube_prometheus_stack:
-    enabled: false
+    enabled: true
 
 # 仅执行预检查，不执行安装动作
 dry_run: false

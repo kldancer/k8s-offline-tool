@@ -47,49 +47,26 @@ echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.d/99-sysctl.conf`)
 }
 
 // --- Containerd Granular ---
-func CheckDockerCEPackage(ctx *Context) (bool, error) {
-	containerdOut, err := ctx.RunCmd("containerd --version")
-	if err != nil {
+func CheckDockerBinary(ctx *Context) (bool, error) {
+	dockerPath, _ := ctx.RunCmd("command -v docker")
+	if !strings.Contains(dockerPath, "/usr/bin/docker") {
 		return false, nil
 	}
 	dockerOut, err := ctx.RunCmd("docker --version")
 	if err != nil {
 		return false, nil
 	}
-	runcOut, err := ctx.RunCmd("runc --version")
-	if err != nil {
-		return false, nil
-	}
-	return strings.Contains(dockerOut, ctx.Cfg.Versions.DockerCE) &&
-		strings.Contains(containerdOut, ctx.Cfg.Versions.Containerd) &&
-		strings.Contains(runcOut, ctx.Cfg.Versions.Runc), nil
+	return strings.Contains(dockerOut, ctx.Cfg.Versions.DockerCE), nil
 }
 
-func InstallDockerCEBinary(ctx *Context) error {
+func InstallDockerBinary(ctx *Context) error {
 	vDocker := strings.ReplaceAll(ctx.Cfg.Versions.DockerCE, ".", "-")
-	vContainerd := strings.ReplaceAll(ctx.Cfg.Versions.Containerd, ".", "-")
-	vRunc := strings.ReplaceAll(ctx.Cfg.Versions.Runc, ".", "-")
-
-	// 1. Install Docker
-	// Path: docker-ce/docker/arm64/29-2-0/docker-29.2.0.tgz
 	dockerTar := fmt.Sprintf("%s/docker-ce/docker/%s/%s/docker-%s.tgz", ctx.RemoteTmpDir, ctx.Arch, vDocker, ctx.Cfg.Versions.DockerCE)
+	ctx.RunCmd("mkdir -p /usr/local/src")
 	ctx.RunCmd(fmt.Sprintf("tar -xzf %s -C /usr/local/src", dockerTar))
-	ctx.RunCmd("cp -f /usr/local/src/docker/* /usr/local/bin/")
+	ctx.RunCmd("cp -f /usr/local/src/docker/* /usr/bin/")
+	ctx.RunCmd("mkdir -p /etc/docker /var/lib/docker")
 
-	// 2. Install Containerd
-	// Path: docker-ce/containerd/arm64/2-2-1/containerd-2.2.1-linux-arm64.tar.gz
-	containerdTar := fmt.Sprintf("%s/docker-ce/containerd/%s/%s/containerd-%s-linux-%s.tar.gz", ctx.RemoteTmpDir, ctx.Arch, vContainerd, ctx.Cfg.Versions.Containerd, ctx.Arch)
-	ctx.RunCmd(fmt.Sprintf("tar -C /usr/local -xzf %s", containerdTar))
-
-	// 3. Install Runc
-	// Path: docker-ce/runc/arm64/1-3-4/runc.arm64
-	runcBin := fmt.Sprintf("%s/docker-ce/runc/%s/%s/runc.%s", ctx.RemoteTmpDir, ctx.Arch, vRunc, ctx.Arch)
-	ctx.RunCmd(fmt.Sprintf("install -m 755 %s /usr/local/sbin/runc", runcBin))
-
-	// 4. Create necessary directories
-	ctx.RunCmd("mkdir -p /etc/docker /var/lib/docker /run/containerd")
-
-	// 5. Create systemd units
 	dockerService := `[Unit]
 Description=Docker Application Container Engine
 Documentation=https://docs.docker.com
@@ -98,7 +75,7 @@ Requires=containerd.service
 
 [Service]
 Type=notify
-ExecStart=/usr/local/bin/dockerd --containerd=/run/containerd/containerd.sock
+ExecStart=/usr/bin/dockerd --containerd=/run/containerd/containerd.sock
 Restart=always
 RestartSec=5
 LimitNOFILE=infinity
@@ -106,33 +83,51 @@ LimitNPROC=infinity
 LimitCORE=infinity
 Delegate=yes
 KillMode=process
-
-[Install]
-WantedBy=multi-user.target
-`
-	containerdService := `[Unit]
-Description=containerd container runtime
-Documentation=https://containerd.io
-After=network.target
-
-[Service]
-ExecStart=/usr/local/bin/containerd
-Restart=always
-RestartSec=5
-Delegate=yes
-KillMode=process
-LimitNOFILE=infinity
-LimitNPROC=infinity
-LimitCORE=infinity
 
 [Install]
 WantedBy=multi-user.target
 `
 	ctx.RunCmd(fmt.Sprintf("cat > /etc/systemd/system/docker.service <<EOF\n%s\nEOF", dockerService))
-	ctx.RunCmd(fmt.Sprintf("cat > /etc/systemd/system/containerd.service <<EOF\n%s\nEOF", containerdService))
-
-	// 6. Reload
 	ctx.RunCmd("systemctl daemon-reload")
+	return nil
+}
+
+func CheckContainerdBinary(ctx *Context) (bool, error) {
+	containerdPath, _ := ctx.RunCmd("command -v containerd")
+	if !strings.Contains(containerdPath, "/usr/bin/containerd") {
+		return false, nil
+	}
+	containerdOut, err := ctx.RunCmd("containerd --version")
+	if err != nil {
+		return false, nil
+	}
+	return strings.Contains(containerdOut, ctx.Cfg.Versions.Containerd), nil
+}
+
+func InstallContainerdBinary(ctx *Context) error {
+	vContainerd := strings.ReplaceAll(ctx.Cfg.Versions.Containerd, ".", "-")
+	containerdTar := fmt.Sprintf("%s/docker-ce/containerd/%s/%s/containerd-%s-linux-%s.tar.gz", ctx.RemoteTmpDir, ctx.Arch, vContainerd, ctx.Cfg.Versions.Containerd, ctx.Arch)
+	ctx.RunCmd(fmt.Sprintf("tar -C /usr/bin -xzf %s", containerdTar))
+	ctx.RunCmd("mkdir -p /run/containerd")
+	return nil
+}
+
+func CheckRuncBinary(ctx *Context) (bool, error) {
+	runcPath, _ := ctx.RunCmd("command -v runc")
+	if !strings.Contains(runcPath, "/usr/bin/runc") {
+		return false, nil
+	}
+	runcOut, err := ctx.RunCmd("runc --version")
+	if err != nil {
+		return false, nil
+	}
+	return strings.Contains(runcOut, ctx.Cfg.Versions.Runc), nil
+}
+
+func InstallRuncBinary(ctx *Context) error {
+	vRunc := strings.ReplaceAll(ctx.Cfg.Versions.Runc, ".", "-")
+	runcBin := fmt.Sprintf("%s/docker-ce/runc/%s/%s/runc.%s", ctx.RemoteTmpDir, ctx.Arch, vRunc, ctx.Arch)
+	ctx.RunCmd(fmt.Sprintf("install -m 755 %s /usr/bin/runc", runcBin))
 	return nil
 }
 
@@ -142,6 +137,27 @@ func CheckContainerdRunning(ctx *Context) (bool, error) {
 }
 
 func ConfigureAndStartContainerd(ctx *Context) error {
+	// 0. 生成systemd文件
+	containerdService := `[Unit]
+Description=containerd container runtime
+Documentation=https://containerd.io
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/containerd
+Restart=always
+RestartSec=5
+Delegate=yes
+KillMode=process
+LimitNOFILE=infinity
+LimitNPROC=infinity
+LimitCORE=infinity
+
+[Install]
+WantedBy=multi-user.target
+`
+	ctx.RunCmd(fmt.Sprintf("cat > /etc/systemd/system/containerd.service <<EOF\n%s\nEOF", containerdService))
+
 	// 1. 生成默认配置
 	ctx.RunCmd("mkdir -p /etc/containerd")
 	ctx.RunCmd("containerd config default > /etc/containerd/config.toml")

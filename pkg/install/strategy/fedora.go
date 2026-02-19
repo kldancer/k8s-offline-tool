@@ -85,11 +85,28 @@ func (f *FedoraInstaller) InstallKeepalived() error {
 }
 
 // --- Containerd Granular ---
-func (f *FedoraInstaller) CheckDockerCEPackage() (bool, error) {
-	return CheckDockerCEPackage(f.Ctx)
+func (f *FedoraInstaller) CheckDockerBinary() (bool, error) {
+	return CheckDockerBinary(f.Ctx)
 }
-func (f *FedoraInstaller) InstallDockerCEPackage() error {
-	return InstallDockerCEBinary(f.Ctx)
+
+func (f *FedoraInstaller) InstallDockerBinary() error {
+	return InstallDockerBinary(f.Ctx)
+}
+
+func (f *FedoraInstaller) CheckContainerdBinary() (bool, error) {
+	return CheckContainerdBinary(f.Ctx)
+}
+
+func (f *FedoraInstaller) InstallContainerdBinary() error {
+	return InstallContainerdBinary(f.Ctx)
+}
+
+func (f *FedoraInstaller) CheckRuncBinary() (bool, error) {
+	return CheckRuncBinary(f.Ctx)
+}
+
+func (f *FedoraInstaller) InstallRuncBinary() error {
+	return InstallRuncBinary(f.Ctx)
 }
 
 func (f *FedoraInstaller) CheckContainerdRunning() (bool, error) {

@@ -15,7 +15,7 @@ multus-cni-images:
   - ghcr.io/k8snetworkplumbingwg/multus-cni:snapshot-thick
 
 hami-images:
-  - registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.35.0
+  - registry.aliyuncs.com/google_containers/kube-scheduler:v1.34.4
   - docker.io/projecthami/hami:v2.7.1
   - docker.io/jettech/kube-webhook-certgen:v1.5.2
   - docker.io/liangjw/kube-webhook-certgen:v1.1.1
@@ -46,4 +46,3 @@ kube-prometheus-stack-images:
   - quay.io/prometheus-operator/prometheus-config-reloader:v0.88.1
   - quay.io/thanos/thanos:v0.40.1
   - quay.io/prometheus/prometheus:v3.9.1
-  - quay.io/thanos/thanos:v0.40.1

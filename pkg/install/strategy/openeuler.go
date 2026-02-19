@@ -87,11 +87,28 @@ func (o *OpenEulerInstaller) InstallKeepalived() error {
 }
 
 // --- Containerd Granular ---
-func (o *OpenEulerInstaller) CheckDockerCEPackage() (bool, error) {
-	return CheckDockerCEPackage(o.Ctx)
+func (o *OpenEulerInstaller) CheckDockerBinary() (bool, error) {
+	return CheckDockerBinary(o.Ctx)
 }
-func (o *OpenEulerInstaller) InstallDockerCEPackage() error {
-	return InstallDockerCEBinary(o.Ctx)
+
+func (o *OpenEulerInstaller) InstallDockerBinary() error {
+	return InstallDockerBinary(o.Ctx)
+}
+
+func (o *OpenEulerInstaller) CheckContainerdBinary() (bool, error) {
+	return CheckContainerdBinary(o.Ctx)
+}
+
+func (o *OpenEulerInstaller) InstallContainerdBinary() error {
+	return InstallContainerdBinary(o.Ctx)
+}
+
+func (o *OpenEulerInstaller) CheckRuncBinary() (bool, error) {
+	return CheckRuncBinary(o.Ctx)
+}
+
+func (o *OpenEulerInstaller) InstallRuncBinary() error {
+	return InstallRuncBinary(o.Ctx)
 }
 
 func (o *OpenEulerInstaller) CheckContainerdRunning() (bool, error) {

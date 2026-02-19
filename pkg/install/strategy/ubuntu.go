@@ -79,11 +79,28 @@ func (u *UbuntuInstaller) InstallKeepalived() error {
 }
 
 // --- Containerd Granular ---
-func (u *UbuntuInstaller) CheckDockerCEPackage() (bool, error) {
-	return CheckDockerCEPackage(u.Ctx)
+func (u *UbuntuInstaller) CheckDockerBinary() (bool, error) {
+	return CheckDockerBinary(u.Ctx)
 }
-func (u *UbuntuInstaller) InstallDockerCEPackage() error {
-	return InstallDockerCEBinary(u.Ctx)
+
+func (u *UbuntuInstaller) InstallDockerBinary() error {
+	return InstallDockerBinary(u.Ctx)
+}
+
+func (u *UbuntuInstaller) CheckContainerdBinary() (bool, error) {
+	return CheckContainerdBinary(u.Ctx)
+}
+
+func (u *UbuntuInstaller) InstallContainerdBinary() error {
+	return InstallContainerdBinary(u.Ctx)
+}
+
+func (u *UbuntuInstaller) CheckRuncBinary() (bool, error) {
+	return CheckRuncBinary(u.Ctx)
+}
+
+func (u *UbuntuInstaller) InstallRuncBinary() error {
+	return InstallRuncBinary(u.Ctx)
 }
 
 func (u *UbuntuInstaller) CheckContainerdRunning() (bool, error) {
