@@ -42,7 +42,7 @@ net.bridge.bridge-nf-call-ip6tables = 1
 EOF`)
 	ctx.RunCmd(`sed -ri '/^[[:space:]]*net\.ipv4\.ip_forward[[:space:]]*=/d' /etc/sysctl.d/99-sysctl.conf &&
 echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.d/99-sysctl.conf`)
-	ctx.RunCmd(" sysctl -p 99-kubernetes-tool.conf")
+	ctx.RunCmd("sysctl -p 99-kubernetes-tool.conf")
 	return nil
 }
 
@@ -261,29 +261,32 @@ func CheckAcceleratorConfig(ctx *Context) (bool, error) {
 	}
 
 	if ctx.HasNPU {
-		out, err := ctx.RunCmd("cat /etc/containerd/config.toml.rpmsave | grep ascend-docker-runtime || true")
-		if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
-			return false, err
-		}
+		//out, err := ctx.RunCmd("cat /etc/containerd/config.toml.rpmsave | grep ascend-docker-runtime || true")
+		//if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
+		//	return false, err
+		//}
 	}
 
 	return true, nil
 }
 
+// TODO: 将环境切换为 cgroupv1 再适配逻辑：
+// https://www.hiascend.com/document/detail/zh/mindcluster/730/clustersched/dlug/dlug_installation_017.html#ZH-CN_TOPIC_0000002479226434__section137058405153
 func ConfigureNpuContainerRuntime(ctx *Context) error {
-	runtimeDir := fmt.Sprintf("%s/docker-runtime/ascend/%s", ctx.RemoteTmpDir, ctx.Arch)
-
-	ctx.RunCmd(fmt.Sprintf("chmod u+x %s/*.run", runtimeDir))
-
-	installCmd := fmt.Sprintf("cd %s && ./*.run --install", runtimeDir)
-	if _, err := ctx.RunCmd(installCmd); err != nil {
-		return fmt.Errorf("failed to install ascend docker runtime: %v", err)
-	}
-
-	out, err := ctx.RunCmd("cat /etc/containerd/config.toml.rpmsave | grep ascend-docker-runtime")
-	if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
-		return fmt.Errorf("failed to verify ascend docker runtime installation: %v", err)
-	}
-	ctx.RunCmd("systemctl restart containerd")
+	//runtimeDir := fmt.Sprintf("%s/docker-runtime/ascend/%s", ctx.RemoteTmpDir, ctx.Arch)
+	//
+	//ctx.RunCmd(fmt.Sprintf("chmod u+x %s/*.run", runtimeDir))
+	//
+	//// 安装 Ascend Docker Runtime
+	//installCmd := fmt.Sprintf("cd %s && ./*.run --install --install-scene=containerd", runtimeDir)
+	//if _, err := ctx.RunCmd(installCmd); err != nil {
+	//	return fmt.Errorf("failed to install ascend docker runtime: %v", err)
+	//}
+	//
+	//out, err := ctx.RunCmd("cat /etc/containerd/config.toml.rpmsave | grep ascend-docker-runtime")
+	//if err != nil || !strings.Contains(out, "ascend-docker-runtime") {
+	//	return fmt.Errorf("failed to verify ascend docker runtime installation: %v", err)
+	//}
+	//ctx.RunCmd("systemctl restart containerd")
 	return nil
 }

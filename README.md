@@ -208,13 +208,12 @@ ha 模式开启时，要求配置3个master节点，其中一个为主 master �
 | nvidia-container-toolkit | 1.18.2-1 |
 | Ascend-docker-runtime | 7.3.0 |
 
-插件部署环节会部署hami、hami-webui以及ascend-device-plugin
+插件部署环节会部署hami、hami-webui
 
 | 名称 | 版本 |
 | ------------ | --------- |
 | hami | 2.7.1 |
 | hami-webui | 1.0.5 |
-| ascend-device-plugin | v1.2.0 |
 
 
 
@@ -248,7 +247,7 @@ go build -o k8s-offline-tool main.go
 ## 安装步骤解析
 
 
-![Installation-steps.png](doc/installation-steps.png)
+![Installation-steps.png](doc/img/installation-steps.png)
 
 
 
@@ -260,32 +259,36 @@ go build -o k8s-offline-tool main.go
 按顺序部署节点，安装基础工具、容器运行时、配置私有镜像仓库、Kubernetes 安装、插件安装，并在第一个 master 节点初始化集群，其他节点加入集群
 ```bash
 root@f1:~# cat config.yaml 
-registry:
-  endpoint: "jusuan.io"
-  port: 8080
-  ip: 192.168.1.7
-  username: "admin"
-  password: "Harbor12345"
-nodes:
-  - ip: "192.168.1.8"
-    password: "root"
-    is_master: true
-  - ip: "192.168.1.10"
-    password: "root"
-  - ip: "192.168.1.3"
-    password: "root"
+install_mode: "full"
+resource_package: "example/resources-ubuntu-amd64.tar.gz"
+
 addons:
   kube_ovn:
     enabled: true
   multus_cni:
     enabled: true
-  hami:
-    enabled: true
-  kube_prometheus_stack:
-    enabled: true
-    
-# 仅执行预检查，正式安装前可先执行预检查模式看看
-# dry_run: true 
+
+dry_run: true
+
+registry:
+  endpoint: "ykl.io"
+  port: 8080
+  ip: 192.168.31.175
+  username: "admin"
+  password: "Harbor12345"
+
+nodes:
+  - ip: "192.168.31.150"
+    password: "root"
+    ssh_port: 22
+    is_master: true
+  - ip: "192.168.31.92"
+    password: "root"
+    ssh_port: 22
+  - ip: "192.168.31.169"
+    password: "root"
+    ssh_port: 22
+
 root@f1:~# ./k8s-offline-tool -config config.yaml
 ```
 
@@ -294,6 +297,8 @@ root@f1:~# ./k8s-offline-tool -config config.yaml
 ```bash
 root@f1:~# cat config.yaml 
 install_mode: "addons-only"
+resource_package: "example/resources-ubuntu-amd64.tar.gz"
+
 registry:
   endpoint: "jusuan.io"
   port: 8080
@@ -325,6 +330,8 @@ root@f1:~# ./k8s-offline-tool -config config.yaml
 ```bash
 root@f1:~# cat config.yaml 
 install_mode: "pre-init"
+resource_package: "example/resources-ubuntu-amd64.tar.gz"
+
 nodes:
   - ip: "192.168.1.8"
     password: "root"
@@ -341,6 +348,8 @@ root@f1:~# ./k8s-offline-tool -config config.yaml
 ```bash
 root@f1:~# cat config.yaml 
 install_mode: "full"
+resource_package: "example/resources-ubuntu-amd64.tar.gz"
+
 nodes:
   - ip: "192.168.1.10"
     password: "root"
@@ -353,55 +362,13 @@ root@f1:~# ./k8s-offline-tool -config config.yaml
 
 ## 📦 运行示例
 
+普通集群安装
+<p align="center">
+  <img src="doc/img/demo.gif" width="900">
+</p>
+
+
 高可用集群安装
-<p align="center">
-  <img src="doc/demo-ha.gif" width="900">
-</p>
-
-
-addons-only模式安装插件
-<p align="center">
-  <img src="doc/demo-addons.gif" width="900">
-</p>
-
-
-
-## 注意事项
-私有镜像仓库镜像同步步骤的执行是在本程序运行的本地环境中进行的，确保本地环境可以访问配置的私有仓库。附上配置示例：
-### docker
-```bash
-cat <<EOF > daemon.json
-{
-  "registry-mirrors": ["https://hdi5v8p1.mirror.aliyuncs.com"],
-  "exec-opts": ["native.cgroupdriver=systemd"],
-  "insecure-registries" : [ "jusuan.io:8080"]
-}
-EOF
-mv daemon.json /etc/docker/
-
-systemctl enable docker.service
-sudo systemctl daemon-reload
-systemctl restart docker.service
-```
-
-### containerd 2.2版本+
-```bash
-containerd config default > /etc/containerd/config.toml
-sudo sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
-sudo sed -i "s|config_path = '/etc/containerd/certs.d:/etc/docker/certs.d'|config_path = '/etc/containerd/certs.d'|g" /etc/containerd/config.toml
-
-sudo mkdir -p /etc/containerd/certs.d/jusuan.io:8080
-sudo tee /etc/containerd/certs.d/jusuan.io:8080/hosts.toml >/dev/null <<'EOF'
-server = "http://jusuan.io:8080"
-
-[host."http://jusuan.io:8080"]
-  capabilities = ["pull", "resolve", "push"]
-EOF
-
-systemctl enable containerd.service
-sudo systemctl daemon-reload
-systemctl restart containerd.service
-```
 
 
 

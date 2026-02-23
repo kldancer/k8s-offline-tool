@@ -1,5 +1,6 @@
 install_mode: "full"
-resource_package: "./resources-openEuler-arm64.tar.gz"
+resource_package: "example/resources-ubuntu-amd64.tar.gz"
+#resource_package: "xxx.tar.gz"
 
 # 组件部署配置（默认不启用）
 addons:
@@ -13,26 +14,26 @@ addons:
     enabled: true
 
 # 仅执行预检查，不执行安装动作
-dry_run: false
+dry_run: true
 
 # 私有仓库配置
 registry:
-  endpoint: "jusuan.io"
+  endpoint: "ykl.io"
   port: 8080
-  ip: 10.10.10.250
+  ip: 192.168.31.175
   username: "admin"
   password: "Harbor12345"
 
 # 节点列表（按顺序进行安装）
 nodes:
-  - ip: "10.10.10.227"
+  - ip: "192.168.31.150"
     password: "root"
     ssh_port: 22
     is_master: true
-  - ip: "10.10.10.146"
+  - ip: "192.168.31.92"
     password: "root"
     ssh_port: 22
-  - ip: "10.10.10.170"
+  - ip: "192.168.31.169"
     password: "root"
     ssh_port: 22
 

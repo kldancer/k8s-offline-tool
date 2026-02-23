@@ -18,6 +18,7 @@ import (
 	"k8s-offline-tool/pkg/install/strategy"
 	"k8s-offline-tool/pkg/runner"
 	"k8s-offline-tool/pkg/ssh"
+	"k8s-offline-tool/pkg/ui"
 )
 
 // Manager 现在对应一个节点的安装任务
@@ -138,7 +139,7 @@ echo "${name}|${version}|${kernel}|${gpu}|${npu}"
 	return nil
 }
 
-func (m *Manager) distributeResources() error {
+func (m *Manager) distributeResources(nodeCtx *ui.NodeContext) error {
 	localHash, err := m.calculateLocalHash()
 	if err != nil {
 		return fmt.Errorf("failed to calculate local resource hash: %v", err)
@@ -148,7 +149,6 @@ func (m *Manager) distributeResources() error {
 	remoteMarkerPath := path.Join(m.context.RemoteTmpDir, ".extracted_success")
 
 	// 上传压缩包
-	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
 	fileName := filepath.Base(m.globalCfg.ResourcePackage)
 
 	f, err := os.Open(m.globalCfg.ResourcePackage)
@@ -168,7 +168,7 @@ func (m *Manager) distributeResources() error {
 
 	onProgress := func(current, total int64) {
 		now := time.Now()
-		if now.Sub(lastUpdate) < 200*time.Millisecond && current < total {
+		if now.Sub(lastUpdate) < 500*time.Millisecond && current < total {
 			return
 		}
 		lastUpdate = now
@@ -180,18 +180,18 @@ func (m *Manager) distributeResources() error {
 		speed := float64(current) / elapsed / 1024 / 1024 // MB/s
 		percent := float64(current) / float64(total) * 100
 
-		fmt.Fprintf(m.output, "\r%s  └─ 正在分发: %s %.2f%% (%.1f/%.1f MB) %.2f MB/s",
-			prefix, fileName, percent, float64(current)/1024/1024, float64(total)/1024/1024, speed)
+		progressStr := fmt.Sprintf("%s %.2f%% (%.1f/%.1f MB) %.2f MB/s",
+			fileName, percent, float64(current)/1024/1024, float64(total)/1024/1024, speed)
+
+		nodeCtx.UpdateResourceProgress(progressStr)
 	}
 
 	if err := m.client.WriteFileWithProgress(remotePkgPath, f, totalSize, onProgress); err != nil {
-		fmt.Fprintf(m.output, "\n")
 		return fmt.Errorf("upload resource package failed: %v", err)
 	}
-	fmt.Fprintf(m.output, "\n")
 
 	// 3. 远端清理并解压
-	fmt.Fprintf(m.output, "%s  └─ 正在远端解压资源...\n", prefix)
+	nodeCtx.UpdateResourceProgress("正在远端解压资源...")
 	extractCmd := fmt.Sprintf("cd %s && tar -xzf resources.tar.gz", m.context.RemoteTmpDir)
 	if _, err := m.client.RunCommand(extractCmd); err != nil {
 		return fmt.Errorf("extract resource package failed: %v", err)
@@ -206,21 +206,47 @@ func (m *Manager) distributeResources() error {
 	return nil
 }
 
-func (m *Manager) Run(dryRun bool) error {
-	if err := m.detectEnv(); err != nil {
+func (m *Manager) Run(nodeCtx *ui.NodeContext, dryRun bool) (err error) {
+	start := time.Now()
+	defer func() {
+		nodeCtx.Mu.Lock()
+		if err != nil && nodeCtx.Err == nil {
+			nodeCtx.Err = err
+		}
+		nodeCtx.Mu.Unlock()
+		nodeCtx.Finish(err == nil, time.Since(start))
+	}()
+
+	m.output = nodeCtx // Ensure output goes to NodeContext
+
+	if err = m.detectEnv(); err != nil {
 		return err
 	}
 
 	// 定义日志前缀
-	fmt.Printf("----------------------------------------------------------------------------------------\n")
 	prefix := fmt.Sprintf("[%s] ", m.nodeCfg.IP)
 	role := "worker"
 	if m.nodeCfg.IsMaster {
 		role = "master"
 	}
-	fmt.Fprintf(m.output, "%s(%d/%d %s) 检测到 %s %s | KernelVersion: %s | Arch: %s | GPU: %v | NPU: %v\n", prefix,
+	fmt.Fprintf(nodeCtx.LogBuffer, "%s(%d/%d %s) 检测到 %s %s | KernelVersion: %s | Arch: %s | GPU: %v | NPU: %v\n", prefix,
 		m.nodeIndex, m.totalNodes, role, m.context.SystemName, m.context.SystemVersion, m.context.KernelVersion, m.context.Arch, m.context.HasGPU, m.context.HasNPU)
 
+	steps := m.GetSteps(nodeCtx)
+
+	// Update total steps in context if needed
+	nodeCtx.Mu.Lock()
+	nodeCtx.TotalSteps = len(steps)
+	if nodeCtx.Bar != nil {
+		nodeCtx.Bar.SetTotal(int64(len(steps)), false)
+	}
+	nodeCtx.Mu.Unlock()
+
+	// 调用 Runner，传入前缀
+	return runner.RunPipeline(steps, prefix, nodeCtx, dryRun)
+}
+
+func (m *Manager) GetSteps(nodeCtx *ui.NodeContext) []runner.Step {
 	steps := []runner.Step{
 		{
 			Name: "分发离线资源",
@@ -234,7 +260,9 @@ func (m *Manager) Run(dryRun bool) error {
 				remoteContent, _ := m.client.RunCommand(checkCmd)
 				return strings.TrimSpace(remoteContent) == localHash, nil
 			},
-			Action: m.distributeResources,
+			Action: func() error {
+				return m.distributeResources(nodeCtx)
+			},
 		},
 	}
 
@@ -414,8 +442,7 @@ func (m *Manager) Run(dryRun bool) error {
 		steps = append(steps, m.addonSteps()...)
 	}
 
-	// 调用 Runner，传入前缀
-	return runner.RunPipeline(steps, prefix, m.output, dryRun)
+	return steps
 }
 
 func (m *Manager) shouldConfigureLoadBalancer() bool {
@@ -703,31 +730,32 @@ func (m *Manager) addonSteps() []runner.Step {
 		})
 	}
 
-	// 5. ascend-device-plugin (AddonsOnly)
+	// TODO: 等后续适配 hami ascend vnpu 再放开该逻辑
+	// 5. ascend-vnpu-device-plugin (AddonsOnly)
 	// 仅在 addons-only 模式、已成功部署 HAMi 且集群中存在 Ascend 节点时才会触发。
-	if mode == config.InstallModeAddonsOnly && m.globalCfg.Addons.Hami.Enabled {
-		steps = append(steps, runner.Step{
-			Name: "部署 ascend-device-plugin",
-			Check: func() (bool, error) {
-				hamiOut, _ := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami$' || true")
-				if strings.TrimSpace(hamiOut) != "hami" {
-					return true, nil // Skip if hami not found
-				}
-
-				npuOut, _ := m.context.RunCmd("kubectl get node -l ascend=on -o name")
-				if strings.TrimSpace(npuOut) == "" {
-					return true, nil // Skip if no ascend nodes
-				}
-
-				out, err := m.context.RunCmd("kubectl get ds -n kube-system hami-ascend-device-plugin --ignore-not-found -o name")
-				if err != nil {
-					return false, err
-				}
-				return strings.TrimSpace(out) != "", nil
-			},
-			Action: m.deployAscendDevicePlugin,
-		})
-	}
+	//if mode == config.InstallModeAddonsOnly && m.globalCfg.Addons.Hami.Enabled {
+	//	steps = append(steps, runner.Step{
+	//		Name: "部署 ascend-vnpu-device-plugin",
+	//		Check: func() (bool, error) {
+	//			hamiOut, _ := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami$' || true")
+	//			if strings.TrimSpace(hamiOut) != "hami" {
+	//				return true, nil // Skip if hami not found
+	//			}
+	//
+	//			npuOut, _ := m.context.RunCmd("kubectl get node -l ascend=on -o name")
+	//			if strings.TrimSpace(npuOut) == "" {
+	//				return true, nil // Skip if no ascend nodes
+	//			}
+	//
+	//			out, err := m.context.RunCmd("kubectl get ds -n kube-system hami-ascend-device-plugin --ignore-not-found -o name")
+	//			if err != nil {
+	//				return false, err
+	//			}
+	//			return strings.TrimSpace(out) != "", nil
+	//		},
+	//		Action: m.deployAscendVNPUDevicePlugin,
+	//	})
+	//}
 
 	return steps
 }
@@ -796,20 +824,21 @@ func (m *Manager) deployHami() error {
 	}
 
 	// 1. 遍历所有节点并打标
-	hasAscend, err := m.labelAcceleratorNodes()
+	_, err := m.labelAcceleratorNodes()
 	if err != nil {
 		return fmt.Errorf("failed to label accelerator nodes: %v", err)
 	}
 
+	// TODO: 等后续适配 hami ascend vnpu 再放开该逻辑
 	// 2. 修改 values.yaml
-	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "hami", "values.yaml")
-	if hasAscend {
-		// 使用更精确的 sed 命令：匹配以 'ascend:' 开头的行，并在该行到后续 'enabled:' 出现的范围内，将 'enabled: false' 替换为 'enabled: true'
-		cmd := fmt.Sprintf("sed -i '/ascend:/,/enabled:/ s/enabled: false/enabled: true/' %s", valuesPath)
-		if _, err := m.context.RunCmd(cmd); err != nil {
-			return fmt.Errorf("failed to enable ascend in hami values.yaml: %v", err)
-		}
-	}
+	//valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "hami", "values.yaml")
+	//if hasAscend {
+	//	// 使用更精确的 sed 命令：匹配以 'ascend:' 开头的行，并在该行到后续 'enabled:' 出现的范围内，将 'enabled: false' 替换为 'enabled: true'
+	//	cmd := fmt.Sprintf("sed -i '/ascend:/,/enabled:/ s/enabled: false/enabled: true/' %s", valuesPath)
+	//	if _, err := m.context.RunCmd(cmd); err != nil {
+	//		return fmt.Errorf("failed to enable ascend in hami values.yaml: %v", err)
+	//	}
+	//}
 
 	return m.deployHelmAddon("hami", "hami-images", path.Join("hami", "hami"), config.DefaultHamiChart, "kube-system")
 }
@@ -833,11 +862,11 @@ func (m *Manager) labelAcceleratorNodes() (bool, error) {
 
 	hasAscendTotal := false
 	for _, node := range m.globalCfg.Nodes {
-		//nodeName := "bms-d838"
-		nodeName, ok := ipToName[node.IP]
-		if !ok {
-			continue
-		}
+		nodeName := "bms-d838"
+		//nodeName, ok := ipToName[node.IP]
+		//if !ok {
+		//	continue
+		//}
 
 		// 探测节点加速卡类型
 		// 我们通过 SSH 连接到每个节点进行探测
@@ -877,7 +906,7 @@ func (m *Manager) probeNodeAccelerators(node config.NodeConfig) (bool, bool, err
 
 	probeCmd := `
 gpu="false"; if lspci | grep -i nvidia >/dev/null 2>&1; then gpu="true"; fi
-npu="false"; if lspci | grep -i "Huawei" >/dev/null 2>&1; then npu="true"; fi
+npu="false"; if lspci | grep d801 | grep Huawei  >/dev/null 2>&1; then npu="true"; fi
 echo "${gpu}|${npu}"
 `
 	out, err := client.RunCommand(strings.TrimSpace(probeCmd))
@@ -891,11 +920,11 @@ echo "${gpu}|${npu}"
 	return parts[0] == "true", parts[1] == "true", nil
 }
 
-func (m *Manager) deployAscendDevicePlugin() error {
+func (m *Manager) deployAscendVNPUDevicePlugin() error {
 	if err := m.ensureAdminConf(); err != nil {
 		return err
 	}
-	manifestPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "ascend-device-plugin", "ascend-device-plugin.yaml")
+	manifestPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "ascend-vnpu-device-plugin", "ascend-device-plugin.yaml")
 
 	// 处理私有仓库
 	if registryHost, ok := m.registryHost(); ok {

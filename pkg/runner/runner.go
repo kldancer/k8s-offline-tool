@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"io"
 	"k8s-offline-tool/pkg/ui"
 	"time"
 )
@@ -13,50 +12,50 @@ type Step struct {
 	Action func() error
 }
 
-func RunPipeline(steps []Step, prefix string, output io.Writer, dryRun bool) error {
-	start := time.Now()
+func RunPipeline(steps []Step, prefix string, nodeCtx *ui.NodeContext, dryRun bool) error {
 	var err error
 	for _, step := range steps {
-		if err = runStep(step, prefix, output, dryRun); err != nil {
+		if err = runStep(step, prefix, nodeCtx, dryRun); err != nil {
 			break
 		}
 	}
-	ui.PrintPipelineSummary(output, prefix, time.Since(start), err == nil)
+
 	return err
 }
 
-func runStep(step Step, prefix string, output io.Writer, dryRun bool) error {
+func runStep(step Step, prefix string, nodeCtx *ui.NodeContext, dryRun bool) error {
 	start := time.Now()
 
-	// 输出增加前缀
-	ui.PrintStepStart(output, prefix, step.Name)
+	nodeCtx.StartStep(step.Name)
 
 	// 1. Check
-	ui.PrintCheckStart(output, prefix)
+	nodeCtx.UpdateStatus(ui.Cyan("🔍 检查中..."))
 	ok, err := step.Check()
 	if err != nil {
-		ui.PrintError(output, prefix, err, time.Since(start))
+		nodeCtx.EndStep(err, time.Since(start), "")
 		return err
 	}
 
 	if ok {
-		ui.PrintSkipped(output, time.Since(start))
+		nodeCtx.UpdateStatus(ui.Green("⏭ 可跳过"))
+		nodeCtx.EndStep(nil, time.Since(start), ui.Green("⏭ 可跳过"))
 		return nil
 	}
-	ui.PrintToExecute(output)
+	nodeCtx.UpdateStatus(ui.Yellow("⏳ 待执行"))
 
 	if dryRun {
-		ui.PrintDryRunSkipped(output, prefix, time.Since(start))
+		nodeCtx.UpdateStatus(ui.Yellow("⏭ 预检查跳过"))
+		nodeCtx.EndStep(nil, time.Since(start), ui.Yellow("⏭ 预检查跳过"))
 		return nil
 	}
 
 	// 2. Action
-	ui.PrintActionStart(output, prefix)
+	nodeCtx.UpdateStatus(ui.Cyan("🚀 正在执行..."))
 	if err := step.Action(); err != nil {
-		ui.PrintError(output, prefix, err, time.Since(start))
+		nodeCtx.EndStep(err, time.Since(start), "")
 		return err
 	}
 
-	ui.PrintSuccess(output, prefix, time.Since(start))
+	nodeCtx.EndStep(nil, time.Since(start), "")
 	return nil
 }
