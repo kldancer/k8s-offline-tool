@@ -3,3 +3,4 @@
 k8s-offline-tool
 k8s-install-summary.log
 *.tar.gz
+k8s-install-summary-bak.log

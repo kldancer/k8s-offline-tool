@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "example/config-ola.yaml", "配置文件路径。e.g. config.yaml")
+	cfgPath := flag.String("config", "example/config-ha.yaml", "配置文件路径。e.g. config.yaml")
 	reportPath := flag.String("report", "k8s-install-summary.log", "安装报告生成路径")
 	flag.Parse()
 

@@ -369,7 +369,14 @@ root@f1:~# ./k8s-offline-tool -config config.yaml
 
 
 高可用集群安装
+<p align="center">
+  <img src="doc/img/demo-ha.gif" width="900">
+</p>
 
+插件模式安装
+<p align="center">
+  <img src="doc/img/demo-addons.gif" width="900">
+</p>
 
 
 ## TODO

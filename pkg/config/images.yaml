@@ -31,7 +31,6 @@ ascend-vnpu-device-plugin-images:
 kube-prometheus-stack-images:
   - docker.io/busybox:latest
   - docker.io/rancher/kubectl:v1.35.0
-  - ghcr.io/prometheus-community/windows-exporter:v0.31.3
   - quay.io/prometheus/alertmanager:v0.31.0
   - docker.io/grafana/grafana:12.3.2
   - docker.io/bats/bats:1.13.0
