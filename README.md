@@ -128,7 +128,10 @@ master_join_command: ""
 | `join_command` | 否  | 空    | worker 加入集群时使用的命令。若未指定，会在 master 初始化后自动生成。                                            |
 | `master_join_command` | 否  | 空    | 子Master 节点加入集群时使用的命令。若未指定，会在 master 节点初始化后自动生成。                                       |
 | `ha` | 否  | 空    | 三 Master 高可用配置。                                                                       |
-| `resource_package` | 是  |  | 本地离线软件包路径                                                             |
+| `resource_package` | 是  |  | 本地离线资源包路径                                                             |
+
+注意：离线资源包下载地址： http://10.10.10.250/k8s-offline-assets/k8s-offline-assets-dist/
+
 #### `versions`（支持版本）
 
 | 字段            | 必填   | 默认值      | 说明            |
