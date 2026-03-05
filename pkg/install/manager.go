@@ -232,6 +232,11 @@ func (m *Manager) Run(nodeCtx *ui.NodeContext, dryRun bool) (err error) {
 	fmt.Fprintf(nodeCtx.LogBuffer, "%s(%d/%d %s) 检测到 %s %s | KernelVersion: %s | Arch: %s | GPU: %v | NPU: %v\n", prefix,
 		m.nodeIndex, m.totalNodes, role, m.context.SystemName, m.context.SystemVersion, m.context.KernelVersion, m.context.Arch, m.context.HasGPU, m.context.HasNPU)
 
+	hasCluster, err := m.checkClusterStatus()
+	if m.globalCfg.InstallMode == config.InstallModeAddonsOnly && !hasCluster {
+		return fmt.Errorf("集群不存在，无法安装插件")
+	}
+
 	steps := m.GetSteps(nodeCtx)
 
 	// Update total steps in context if needed
@@ -717,45 +722,47 @@ func (m *Manager) addonSteps() []runner.Step {
 			Action: m.deployHami,
 		})
 
+		// TODO: HAMI-UI 官方前端arm镜像有bug先不安装
+		if m.context.Arch != "arm64" {
+			steps = append(steps, runner.Step{
+				Name: "部署 HAMI-WebUI",
+				Check: func() (bool, error) {
+					out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami-webui$' || true")
+					if err != nil {
+						return false, err
+					}
+					return strings.TrimSpace(out) == "hami-webui", nil
+				},
+				Action: m.deployHamiWebUI,
+			})
+		}
+	}
+
+	// 5. ascend-vnpu-device-plugin (AddonsOnly)
+	// 仅在 addons-only 模式、已成功部署 HAMi 且集群中存在 Ascend 节点时才会触发。
+	if mode == config.InstallModeAddonsOnly && m.globalCfg.Addons.Hami.Enabled {
 		steps = append(steps, runner.Step{
-			Name: "部署 HAMI-WebUI",
+			Name: "部署 ascend-vnpu-device-plugin",
 			Check: func() (bool, error) {
-				out, err := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami-webui$' || true")
+				hamiOut, _ := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami$' || true")
+				if strings.TrimSpace(hamiOut) != "hami" {
+					return true, nil // Skip if hami not found
+				}
+
+				npuOut, _ := m.context.RunCmd("kubectl get node -l ascend=on -o name")
+				if strings.TrimSpace(npuOut) == "" {
+					return true, nil // Skip if no ascend nodes
+				}
+
+				out, err := m.context.RunCmd("kubectl get ds -n kube-system hami-ascend-device-plugin --ignore-not-found -o name")
 				if err != nil {
 					return false, err
 				}
-				return strings.TrimSpace(out) == "hami-webui", nil
+				return strings.TrimSpace(out) != "", nil
 			},
-			Action: m.deployHamiWebUI,
+			Action: m.deployAscendVNPUDevicePlugin,
 		})
 	}
-
-	// TODO: 等后续适配 hami ascend vnpu 再放开该逻辑
-	// 5. ascend-vnpu-device-plugin (AddonsOnly)
-	// 仅在 addons-only 模式、已成功部署 HAMi 且集群中存在 Ascend 节点时才会触发。
-	//if mode == config.InstallModeAddonsOnly && m.globalCfg.Addons.Hami.Enabled {
-	//	steps = append(steps, runner.Step{
-	//		Name: "部署 ascend-vnpu-device-plugin",
-	//		Check: func() (bool, error) {
-	//			hamiOut, _ := m.context.RunCmd("helm -n kube-system list -q | grep -w '^hami$' || true")
-	//			if strings.TrimSpace(hamiOut) != "hami" {
-	//				return true, nil // Skip if hami not found
-	//			}
-	//
-	//			npuOut, _ := m.context.RunCmd("kubectl get node -l ascend=on -o name")
-	//			if strings.TrimSpace(npuOut) == "" {
-	//				return true, nil // Skip if no ascend nodes
-	//			}
-	//
-	//			out, err := m.context.RunCmd("kubectl get ds -n kube-system hami-ascend-device-plugin --ignore-not-found -o name")
-	//			if err != nil {
-	//				return false, err
-	//			}
-	//			return strings.TrimSpace(out) != "", nil
-	//		},
-	//		Action: m.deployAscendVNPUDevicePlugin,
-	//	})
-	//}
 
 	return steps
 }
@@ -824,21 +831,20 @@ func (m *Manager) deployHami() error {
 	}
 
 	// 1. 遍历所有节点并打标
-	_, err := m.labelAcceleratorNodes()
+	hasAscend, err := m.labelAcceleratorNodes()
 	if err != nil {
 		return fmt.Errorf("failed to label accelerator nodes: %v", err)
 	}
 
-	// TODO: 等后续适配 hami ascend vnpu 再放开该逻辑
 	// 2. 修改 values.yaml
-	//valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "hami", "values.yaml")
-	//if hasAscend {
-	//	// 使用更精确的 sed 命令：匹配以 'ascend:' 开头的行，并在该行到后续 'enabled:' 出现的范围内，将 'enabled: false' 替换为 'enabled: true'
-	//	cmd := fmt.Sprintf("sed -i '/ascend:/,/enabled:/ s/enabled: false/enabled: true/' %s", valuesPath)
-	//	if _, err := m.context.RunCmd(cmd); err != nil {
-	//		return fmt.Errorf("failed to enable ascend in hami values.yaml: %v", err)
-	//	}
-	//}
+	valuesPath := path.Join(m.context.RemoteTmpDir, "helm-resource", "hami", "hami", "values.yaml")
+	if hasAscend {
+		// 使用更精确的 sed 命令：匹配以 'ascend:' 开头的行，并在该行到后续 'enabled:' 出现的范围内，将 'enabled: false' 替换为 'enabled: true'
+		cmd := fmt.Sprintf("sed -i '/ascend:/,/enabled:/ s/enabled: false/enabled: true/' %s", valuesPath)
+		if _, err := m.context.RunCmd(cmd); err != nil {
+			return fmt.Errorf("failed to enable ascend in hami values.yaml: %v", err)
+		}
+	}
 
 	return m.deployHelmAddon("hami", "hami-images", path.Join("hami", "hami"), config.DefaultHamiChart, "kube-system")
 }
@@ -862,11 +868,12 @@ func (m *Manager) labelAcceleratorNodes() (bool, error) {
 
 	hasAscendTotal := false
 	for _, node := range m.globalCfg.Nodes {
-		nodeName := "bms-d838"
-		//nodeName, ok := ipToName[node.IP]
-		//if !ok {
-		//	continue
-		//}
+		//nodeName := "bms-d838"
+
+		nodeName, ok := ipToName[node.IP]
+		if !ok {
+			continue
+		}
 
 		// 探测节点加速卡类型
 		// 我们通过 SSH 连接到每个节点进行探测
